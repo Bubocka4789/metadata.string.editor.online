@@ -3,337 +3,348 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Metadata String Editor</title>
+<title>Robust Global Metadata String Editor</title>
 <style>
   body {
-    margin: 0;
-    font-family: system-ui, sans-serif;
-    background: #121212;
-    color: #e0e0e0;
-    padding: 1rem;
-    display: flex;
-    flex-direction: column;
-    min-height: 100vh;
+    background: #121212; color: #eee; font-family: monospace; margin:0; padding:1rem;
+    display: flex; flex-direction: column; height: 100vh;
   }
-  h1 {
-    text-align: center;
-    margin-bottom: 1rem;
+  #topbar {
+    display: flex; gap: 1rem; margin-bottom: 1rem; align-items: center;
   }
-  #controls {
-    display: flex;
-    gap: 1rem;
-    flex-wrap: wrap;
-    justify-content: center;
-    margin-bottom: 1rem;
+  input[type="file"] {
+    background: #222; border: none; padding: 0.5rem; color: #eee; border-radius: 4px;
   }
-  input[type="file"],
-  input[type="text"],
+  input[type="text"] {
+    background: #222; border: none; padding: 0.5rem; color: #eee; border-radius: 4px;
+    flex: 1;
+  }
   button {
-    background: #000;
-    color: #eee;
-    border: 1px solid #555;
-    border-radius: 4px;
-    padding: 0.4rem 0.6rem;
-    font-size: 1rem;
-    outline-offset: 2px;
-    transition: border-color 0.2s ease;
+    background: #4caf50; border:none; padding: 0.5rem 1rem; border-radius: 4px; color:#121212;
+    cursor: pointer;
   }
-  input[type="file"]:focus,
-  input[type="text"]:focus,
-  button:focus {
-    border-color: #4caf50;
+  button:disabled {
+    background: #666; cursor: default;
   }
   #progress-container {
-    display: none;
-    width: 100%;
-    max-width: 600px;
-    margin: 0 auto 1rem auto;
-    background: #333;
-    border-radius: 8px;
-    overflow: hidden;
-    height: 20px;
+    width: 100%; height: 22px; background: #333; border-radius: 11px; overflow: hidden;
+    margin-bottom: 1rem;
   }
   #progress-bar {
-    height: 100%;
-    width: 0%;
-    background: #4caf50;
-    text-align: center;
-    color: #fff;
-    font-weight: bold;
-    line-height: 20px;
-    user-select: none;
-    transition: width 0.2s ease;
-    font-size: 0.9rem;
+    height: 100%; width: 0%; background: #4caf50; transition: width 0.2s ease;
+    display: flex; align-items: center; justify-content: center; font-size: 0.9rem;
+    color: #121212; font-weight: bold; user-select:none;
   }
   #string-list {
-    max-height: 60vh;
-    overflow-y: auto;
-    border: 1px solid #444;
-    border-radius: 6px;
+    flex: 1; overflow-y: auto; background: #1e1e1e; border: 1px solid #444; border-radius: 6px;
     padding: 0.5rem;
-    background: #1e1e1e;
-    flex-grow: 1;
-    user-select: text;
   }
   .string-item {
-    background: #2a2a2a;
-    padding: 0.5rem;
-    border-radius: 4px;
-    margin-bottom: 0.5rem;
-    display: flex;
-    gap: 1rem;
-    align-items: center;
-    flex-wrap: wrap;
-  }
-  .string-label {
-    flex-basis: 100%;
-    color: #90caf9;
-    font-size: 0.85rem;
-    margin-bottom: 0.25rem;
-    font-family: monospace;
-    user-select: text;
+    display: flex; gap: 1rem; margin-bottom: 0.3rem; align-items: center;
   }
   .string-col {
-    flex: 1 1 45%;
-    display: flex;
-    flex-direction: column;
-    min-width: 200px;
+    flex: 1 1 45%; display: flex; flex-direction: column;
   }
-  .string-col label {
-    font-size: 0.75rem;
-    margin-bottom: 0.15rem;
-    color: #bbb;
-    user-select: none;
+  label {
+    font-size: 0.7rem; color: #bbb; margin-bottom: 0.1rem; user-select:none;
   }
-  .string-col input {
+  input.string-input {
+    background: #000; border: 1px solid #555; border-radius: 4px; color: #eee;
+    padding: 0.2rem 0.4rem; font-family: monospace; font-size: 1rem;
     width: 100%;
-    font-family: monospace;
-    font-size: 1rem;
-    background: #000;
-    border: 1px solid #555;
-    border-radius: 4px;
-    color: #eee;
-    padding: 0.3rem 0.5rem;
-    transition: border-color 0.2s ease;
+    box-sizing: border-box;
   }
-  .string-col input:focus {
-    border-color: #4caf50;
-    outline: none;
+  input[readonly] {
+    background: #222; color: #777; cursor: default;
   }
-  .string-col input[readonly] {
-    background: #222;
-    color: #777;
-    cursor: default;
-  }
-  @media (max-width: 600px) {
-    .string-col {
-      flex-basis: 100%;
-    }
+  #status-text {
+    margin-top: 0.5rem; font-size: 0.9rem; color: #888;
+    user-select:none;
   }
 </style>
 </head>
 <body>
-<h1>Metadata String Editor</h1>
-<div id="controls">
-  <input type="file" id="file-input" accept=".dat" aria-label="Load .dat file" />
-  <input type="text" id="search" placeholder="Search..." aria-label="Search strings" />
-  <button id="download-btn" aria-label="Download modified file">Download</button>
+
+<div id="topbar">
+  <input type="file" id="file-input" accept=".dat" />
+  <input type="text" id="search" placeholder="Case-sensitive search" disabled />
+  <button id="download-btn" disabled>Download</button>
 </div>
-<div id="progress-container" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+
+<div id="progress-container" aria-label="Progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" style="display:none;">
   <div id="progress-bar">0%</div>
 </div>
+
 <div id="string-list" aria-live="polite" aria-relevant="additions"></div>
+<div id="status-text"></div>
 
 <script>
+(() => {
   const fileInput = document.getElementById('file-input');
   const progressBar = document.getElementById('progress-bar');
   const progressContainer = document.getElementById('progress-container');
   const stringList = document.getElementById('string-list');
   const searchInput = document.getElementById('search');
   const downloadBtn = document.getElementById('download-btn');
+  const statusText = document.getElementById('status-text');
 
-  let entries = [];
+  // Global variables for file buffer and string entries
   let buffer = null;
+  let entries = [];
+  let filteredEntries = [];
+  let originalDomCache = new Map(); // cache original DOM nodes keyed by entry id
+  let visibleEntryCount = 0;
 
-  fileInput.addEventListener('change', () => {
-    const file = fileInput.files[0];
-    if (!file) return;
+  // Config
+  const BATCH_STRINGS_RENDER = 50;    // how many strings to append to DOM per batch render call
+  const MAX_VISIBLE_RESULTS = 1000;   // max number of strings shown for performance (pagination can be added)
+  const MIN_STRING_LEN = 3;
 
-    entries = [];
-    stringList.innerHTML = '';
-    progressContainer.style.display = 'block';
-    updateProgress(0);
+  // Helpers
+  const textDecoder = new TextDecoder('ascii');
+  const textEncoder = new TextEncoder();
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      buffer = new Uint8Array(reader.result);
-      extractStrings(buffer, (results) => {
-        entries = results;
-        renderEntries(entries);
-        updateProgress(100);
-        setTimeout(() => {
-          progressContainer.style.display = 'none';
-        }, 400);
-      });
+  // requestIdleCallback fallback
+  const idleCallback = window.requestIdleCallback || function (fn) { return setTimeout(fn, 50); };
+
+  // Utility debounce function for search input
+  function debounce(fn, delay) {
+    let timeout;
+    return (...args) => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => fn(...args), delay);
     };
-    reader.readAsArrayBuffer(file);
-  });
+  }
 
+  // Update progress bar UI
   function updateProgress(percent) {
     progressBar.style.width = percent + '%';
     progressBar.textContent = percent + '%';
     progressContainer.setAttribute('aria-valuenow', percent);
   }
 
-  // Extract ASCII strings (3+ chars), asynchronously in chunks, showing strings as they are found
-  function extractStrings(buf, callback) {
-    const strings = [];
-    const minLength = 3;
-    const decoder = new TextDecoder('ascii');
-    let i = 0;
-    const chunkSize = 50000;
-
-    function processChunk() {
-      const end = Math.min(i + chunkSize, buf.length);
-
-      while (i < end) {
-        if (buf[i] >= 0x20 && buf[i] <= 0x7E) {
-          const start = i;
-          while (i < buf.length && buf[i] >= 0x20 && buf[i] <= 0x7E) i++;
-
-          // Accept string if followed by null terminator or end of buffer
-          if (i === buf.length || buf[i] === 0x00) {
-            const str = decoder.decode(buf.slice(start, i));
-            if (str.length >= minLength) {
-              const entry = { offset: start, original: str, current: str };
-              strings.push(entry);
-              renderEntry(entry); // Render incrementally as found
-            }
-            if (i < buf.length && buf[i] === 0x00) i++; // skip null terminator
-          }
-        } else {
-          i++;
-        }
-      }
-
-      updateProgress(Math.floor((i / buf.length) * 100));
-
-      if (i < buf.length) {
-        setTimeout(processChunk, 0); // yield to UI thread
-      } else {
-        callback(strings);
-      }
-    }
-
-    processChunk();
+  // Clear all current displayed strings from DOM and cache
+  function clearDisplayedStrings() {
+    stringList.innerHTML = '';
+    originalDomCache.clear();
+    visibleEntryCount = 0;
   }
 
-  // Render all entries - replaced by incremental renderEntry during extraction, but kept for search reset
-  function renderEntries(list) {
-    stringList.innerHTML = '';
-    if (list.length === 0) {
-      stringList.textContent = 'No strings found.';
+  // Create a DOM element for one string entry (or reuse cached one)
+  function createOrReuseEntryElement(entry) {
+    if (originalDomCache.has(entry.id)) {
+      return originalDomCache.get(entry.id);
+    }
+
+    const div = document.createElement('div');
+    div.className = 'string-item';
+    div.dataset.id = entry.id;
+
+    // Original string column
+    const colOrig = document.createElement('div');
+    colOrig.className = 'string-col';
+    const labelOrig = document.createElement('label');
+    labelOrig.textContent = `Offset: 0x${entry.offset.toString(16).toUpperCase().padStart(8, '0')}`;
+    const inputOrig = document.createElement('input');
+    inputOrig.type = 'text';
+    inputOrig.readOnly = true;
+    inputOrig.className = 'string-input';
+    inputOrig.value = entry.original;
+
+    colOrig.appendChild(labelOrig);
+    colOrig.appendChild(inputOrig);
+
+    // Modified string column
+    const colMod = document.createElement('div');
+    colMod.className = 'string-col';
+    const labelMod = document.createElement('label');
+    labelMod.textContent = 'Modified';
+    const inputMod = document.createElement('input');
+    inputMod.type = 'text';
+    inputMod.className = 'string-input';
+    inputMod.value = entry.modified;
+
+    // On user input, update entry.modified (filter out non-printable ascii)
+    inputMod.addEventListener('input', () => {
+      let val = inputMod.value;
+      // Allow printable ASCII only (space to ~)
+      val = val.replace(/[^\x20-\x7E]/g, '');
+      if (val !== inputMod.value) inputMod.value = val;
+      entry.modified = val;
+    });
+
+    colMod.appendChild(labelMod);
+    colMod.appendChild(inputMod);
+
+    div.appendChild(colOrig);
+    div.appendChild(colMod);
+
+    originalDomCache.set(entry.id, div);
+    return div;
+  }
+
+  // Render a batch of strings to DOM incrementally to avoid freezes
+  function renderStringsIncrementally(strings, startIndex = 0) {
+    if (startIndex >= strings.length || visibleEntryCount >= MAX_VISIBLE_RESULTS) {
+      updateStatus(`Displayed ${visibleEntryCount} strings.`);
       return;
     }
 
     const fragment = document.createDocumentFragment();
+    let count = 0;
 
-    list.forEach((entry) => {
-      const div = createEntryElement(entry);
-      fragment.appendChild(div);
-    });
+    for (let i = startIndex; i < strings.length && count < BATCH_STRINGS_RENDER && visibleEntryCount < MAX_VISIBLE_RESULTS; i++, count++, visibleEntryCount++) {
+      fragment.appendChild(createOrReuseEntryElement(strings[i]));
+    }
 
     stringList.appendChild(fragment);
-  }
 
-  // Render a single string entry incrementally
-  function renderEntry(entry) {
-    const div = createEntryElement(entry);
-    stringList.appendChild(div);
-  }
-
-  // Create the DOM element for an entry
-  function createEntryElement(entry) {
-    const div = document.createElement('div');
-    div.className = 'string-item';
-
-    const label = document.createElement('div');
-    label.className = 'string-label';
-    label.textContent = `[0x${entry.offset.toString(16).toUpperCase().padStart(8, '0')}]`;
-
-    const originalCol = document.createElement('div');
-    originalCol.className = 'string-col';
-    const originalLabel = document.createElement('label');
-    originalLabel.textContent = 'Original';
-    const originalInput = document.createElement('input');
-    originalInput.type = 'text';
-    originalInput.value = entry.original;
-    originalInput.readOnly = true;
-    originalInput.setAttribute('aria-label', `Original string at offset 0x${entry.offset.toString(16)}`);
-    originalCol.appendChild(originalLabel);
-    originalCol.appendChild(originalInput);
-
-    const modifiedCol = document.createElement('div');
-    modifiedCol.className = 'string-col';
-    const modifiedLabel = document.createElement('label');
-    modifiedLabel.textContent = 'Modified';
-    const modifiedInput = document.createElement('input');
-    modifiedInput.type = 'text';
-    modifiedInput.value = entry.current;
-    modifiedInput.setAttribute('aria-label', `Modified string at offset 0x${entry.offset.toString(16)}`);
-
-    modifiedInput.addEventListener('input', () => {
-      // Allow any printable ASCII characters, no length restriction
-      const filtered = modifiedInput.value.replace(/[^\x20-\x7E]/g, '');
-      modifiedInput.value = filtered;
-      entry.current = filtered;
+    // Schedule next batch
+    idleCallback(() => {
+      renderStringsIncrementally(strings, startIndex + count);
     });
-
-    modifiedCol.appendChild(modifiedLabel);
-    modifiedCol.appendChild(modifiedInput);
-
-    div.appendChild(label);
-    div.appendChild(originalCol);
-    div.appendChild(modifiedCol);
-
-    return div;
   }
 
-  // Search is CASE SENSITIVE as requested
-  searchInput.addEventListener('input', () => {
-    const query = searchInput.value;
+  // Show filtered strings with batching and virtual limit
+  function showFilteredStrings(query) {
+    clearDisplayedStrings();
+
     if (!query) {
-      renderEntries(entries);
-      return;
+      filteredEntries = entries;
+    } else {
+      filteredEntries = entries.filter(e => e.original.includes(query) || e.modified.includes(query));
     }
-    const filtered = entries.filter(e =>
-      e.original.includes(query) || e.current.includes(query)
-    );
-    renderEntries(filtered);
+
+    visibleEntryCount = 0;
+    renderStringsIncrementally(filteredEntries);
+  }
+
+  // Incrementally extract strings from file buffer in small chunks to avoid freezes
+  function incrementalExtractStrings(buf) {
+    entries = [];
+    clearDisplayedStrings();
+
+    const len = buf.length;
+    let pos = 0;
+    let idCounter = 0;
+
+    updateStatus('Extracting strings...');
+    progressContainer.style.display = 'block';
+    updateProgress(0);
+
+    function extractChunk(deadline) {
+      while ((deadline.timeRemaining() > 0 || deadline.didTimeout) && pos < len) {
+        if (buf[pos] >= 0x20 && buf[pos] <= 0x7E) {
+          const start = pos;
+          while (pos < len && buf[pos] >= 0x20 && buf[pos] <= 0x7E) pos++;
+          const strLen = pos - start;
+          if (strLen >= MIN_STRING_LEN) {
+            const str = textDecoder.decode(buf.slice(start, pos));
+            entries.push({ id: idCounter++, offset: start, original: str, modified: str });
+          }
+        } else {
+          pos++;
+        }
+      }
+
+      updateProgress(Math.floor((pos / len) * 100));
+
+      if (pos < len) {
+        requestIdleCallback(extractChunk, { timeout: 50 });
+      } else {
+        updateProgress(100);
+        progressContainer.style.display = 'none';
+        updateStatus(`Extraction complete. ${entries.length} strings found.`);
+        searchInput.disabled = false;
+        downloadBtn.disabled = false;
+        filteredEntries = entries;
+        renderStringsIncrementally(entries);
+      }
+    }
+
+    requestIdleCallback(extractChunk, { timeout: 50 });
+  }
+
+  // Update status text below list
+  function updateStatus(text) {
+    statusText.textContent = text;
+  }
+
+  // File load event
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+
+    searchInput.value = '';
+    searchInput.disabled = true;
+    downloadBtn.disabled = true;
+    entries = [];
+    filteredEntries = [];
+    originalDomCache.clear();
+    stringList.innerHTML = '';
+    visibleEntryCount = 0;
+    buffer = null;
+    updateStatus('');
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      buffer = new Uint8Array(reader.result);
+      incrementalExtractStrings(buffer);
+    };
+    reader.readAsArrayBuffer(file);
   });
 
-  // Download the buffer with modifications applied
+  // Debounced search input handling
+  searchInput.addEventListener('input', debounce(() => {
+    if (!buffer) return;
+    const q = searchInput.value;
+    updateStatus(q ? `Searching for "${q}"...` : '');
+    showFilteredStrings(q);
+  }, 250));
+
+  // Download patched file event
   downloadBtn.addEventListener('click', () => {
     if (!buffer || entries.length === 0) return;
 
-    const updated = new Uint8Array(buffer); // copy original buffer
+    updateStatus('Generating patched file...');
+
+    // Create copy of original buffer for patching
+    const patched = new Uint8Array(buffer);
+
+    // Patch strings in-place
     entries.forEach(e => {
-      // Write modified string over original space, pad with null bytes if shorter
-      const enc = new TextEncoder().encode(e.current.padEnd(e.original.length, '\0'));
-      updated.set(enc.slice(0, e.original.length), e.offset);
+      // Prepare encoded modified string padded or truncated to original length
+      let modStr = e.modified;
+      if (modStr.length > e.original.length) {
+        // If longer, truncate to original length (for safety)
+        modStr = modStr.slice(0, e.original.length);
+      } else if (modStr.length < e.original.length) {
+        // Pad with null bytes to keep offset stable
+        modStr = modStr.padEnd(e.original.length, '\0');
+      }
+      const modEncoded = textEncoder.encode(modStr);
+      patched.set(modEncoded, e.offset);
     });
 
-    const blob = new Blob([updated], { type: 'application/octet-stream' });
+    // Trigger download
+    const blob = new Blob([patched], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
 
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'modified-global-metadata.dat';
-    document.body.appendChild(a);
+    a.download = 'patched-global-metadata.dat';
     a.click();
-    a.remove();
+
     URL.revokeObjectURL(url);
+    updateStatus('Download complete.');
   });
+
+  // Init UI state
+  searchInput.disabled = true;
+  downloadBtn.disabled = true;
+  updateStatus('Load a .dat file to start.');
+})();
 </script>
+
 </body>
 </html>
