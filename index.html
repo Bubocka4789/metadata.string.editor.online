@@ -74,6 +74,7 @@
       background: #1e1e1e;
       flex-grow: 1;
       user-select: text;
+      font-family: monospace;
     }
     .string-item {
       background: #2a2a2a;
@@ -90,7 +91,6 @@
       color: #90caf9;
       font-size: 0.85rem;
       margin-bottom: 0.25rem;
-      font-family: monospace;
       user-select: text;
     }
     .string-col {
@@ -136,7 +136,7 @@
   <h1>Metadata String Editor</h1>
   <div id="controls">
     <input type="file" id="file-input" accept=".dat" aria-label="Load .dat file" />
-    <input type="text" id="search" placeholder="Search (case sensitive)" aria-label="Search strings" />
+    <input type="text" id="search" placeholder="Search..." aria-label="Search strings" />
     <button id="download-btn" aria-label="Download modified file">Download</button>
   </div>
   <div id="progress-container" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
@@ -155,146 +155,169 @@
     let entries = [];
     let buffer = null;
 
-    fileInput.addEventListener('change', () => {
-      const file = fileInput.files[0];
-      if (!file) return;
-
-      entries = [];
-      buffer = null;
-      stringList.innerHTML = '';
-      progressContainer.style.display = 'block';
-      updateProgress(0);
-
-      const reader = new FileReader();
-      reader.onload = () => {
-        buffer = new Uint8Array(reader.result);
-        extractStringsLive(buffer, () => {
-          updateProgress(100);
-          setTimeout(() => {
-            progressContainer.style.display = 'none';
-          }, 400);
-        });
-      };
-      reader.readAsArrayBuffer(file);
-    });
-
+    // Helper: update progress bar UI
     function updateProgress(percent) {
       progressBar.style.width = percent + '%';
       progressBar.textContent = percent + '%';
       progressContainer.setAttribute('aria-valuenow', percent);
     }
 
-    // Append one entry to DOM
-    function appendEntryToDOM(entry) {
-      const div = document.createElement('div');
-      div.className = 'string-item';
-
-      const label = document.createElement('div');
-      label.className = 'string-label';
-      label.textContent = `[0x${entry.offset.toString(16).toUpperCase().padStart(8, '0')}]`;
-
-      const originalCol = document.createElement('div');
-      originalCol.className = 'string-col';
-      const originalLabel = document.createElement('label');
-      originalLabel.textContent = 'Original';
-      const originalInput = document.createElement('input');
-      originalInput.type = 'text';
-      originalInput.value = entry.original;
-      originalInput.readOnly = true;
-      originalInput.setAttribute('aria-label', `Original string at offset 0x${entry.offset.toString(16)}`);
-      originalCol.appendChild(originalLabel);
-      originalCol.appendChild(originalInput);
-
-      const modifiedCol = document.createElement('div');
-      modifiedCol.className = 'string-col';
-      const modifiedLabel = document.createElement('label');
-      modifiedLabel.textContent = 'Modified';
-      const modifiedInput = document.createElement('input');
-      modifiedInput.type = 'text';
-      modifiedInput.value = entry.current;
-      modifiedInput.maxLength = entry.original.length;
-      modifiedInput.setAttribute('aria-label', `Modified string at offset 0x${entry.offset.toString(16)}`);
-
-      modifiedInput.addEventListener('input', () => {
-        let filtered = modifiedInput.value.replace(/[^\x20-\x7E]/g, '');
-        if (filtered.length > entry.original.length) {
-          filtered = filtered.slice(0, entry.original.length);
-        }
-        modifiedInput.value = filtered;
-        entry.current = filtered;
-      });
-
-      modifiedCol.appendChild(modifiedLabel);
-      modifiedCol.appendChild(modifiedInput);
-
-      div.appendChild(label);
-      div.appendChild(originalCol);
-      div.appendChild(modifiedCol);
-
-      stringList.appendChild(div);
-    }
-
-    // Render list fully, used by search to replace all shown entries
-    function renderList(list) {
+    // Render current visible entries based on search filter
+    function renderEntries(list) {
       stringList.innerHTML = '';
       if (list.length === 0) {
         stringList.textContent = 'No strings found.';
         return;
       }
+
       const fragment = document.createDocumentFragment();
-      list.forEach(appendEntryToDOM);
+
+      list.forEach((entry) => {
+        const div = document.createElement('div');
+        div.className = 'string-item';
+
+        const label = document.createElement('div');
+        label.className = 'string-label';
+        label.textContent = `[0x${entry.offset.toString(16).toUpperCase().padStart(8, '0')}]`;
+
+        const originalCol = document.createElement('div');
+        originalCol.className = 'string-col';
+        const originalLabel = document.createElement('label');
+        originalLabel.textContent = 'Original';
+        const originalInput = document.createElement('input');
+        originalInput.type = 'text';
+        originalInput.value = entry.original;
+        originalInput.readOnly = true;
+        originalInput.setAttribute('aria-label', `Original string at offset 0x${entry.offset.toString(16)}`);
+        originalCol.appendChild(originalLabel);
+        originalCol.appendChild(originalInput);
+
+        const modifiedCol = document.createElement('div');
+        modifiedCol.className = 'string-col';
+        const modifiedLabel = document.createElement('label');
+        modifiedLabel.textContent = 'Modified';
+        const modifiedInput = document.createElement('input');
+        modifiedInput.type = 'text';
+        modifiedInput.value = entry.current;
+        modifiedInput.maxLength = entry.original.length;
+        modifiedInput.setAttribute('aria-label', `Modified string at offset 0x${entry.offset.toString(16)}`);
+
+        modifiedInput.addEventListener('input', () => {
+          // Keep only printable ASCII chars and enforce max length
+          let filtered = modifiedInput.value.replace(/[^\x20-\x7E]/g, '');
+          if (filtered.length > entry.original.length) {
+            filtered = filtered.slice(0, entry.original.length);
+          }
+          modifiedInput.value = filtered;
+          entry.current = filtered;
+        });
+
+        modifiedCol.appendChild(modifiedLabel);
+        modifiedCol.appendChild(modifiedInput);
+
+        div.appendChild(label);
+        div.appendChild(originalCol);
+        div.appendChild(modifiedCol);
+
+        fragment.appendChild(div);
+      });
+
       stringList.appendChild(fragment);
     }
 
-    // Extract strings live without filtering during extraction (show ALL)
-    function extractStringsLive(buf, doneCallback) {
-      const minLength = 3;
-      const decoder = new TextDecoder('ascii');
-      let i = 0;
-
-      function nextChunk() {
-        let countThisTick = 0;
-
-        while (i < buf.length) {
-          if (buf[i] >= 0x20 && buf[i] <= 0x7E) {
-            const start = i;
-            while (i < buf.length && buf[i] >= 0x20 && buf[i] <= 0x7E) i++;
-            if (i === buf.length || buf[i] === 0x00) {
-              const str = decoder.decode(buf.slice(start, i));
-              if (str.length >= minLength) {
-                const entry = { offset: start, original: str, current: str };
-                entries.push(entry);
-                appendEntryToDOM(entry); // append all live for instant feedback
-                countThisTick++;
-                if (countThisTick >= 50) break; // yield every 50 found strings
-              }
-              if (i < buf.length && buf[i] === 0x00) i++;
-            }
-          } else {
-            i++;
-          }
-        }
-
-        updateProgress(Math.floor((i / buf.length) * 100));
-
-        if (i < buf.length) {
-          setTimeout(nextChunk, 0);
-        } else {
-          doneCallback();
-        }
-      }
-      nextChunk();
-    }
-
-    // Search case sensitive: filter entries and render only matches
+    // Case-sensitive search filter
     searchInput.addEventListener('input', () => {
       const query = searchInput.value;
       if (!query) {
-        renderList(entries);
+        renderEntries(entries);
         return;
       }
-      const filtered = entries.filter(e => e.original.includes(query) || e.current.includes(query));
-      renderList(filtered);
+      const filtered = entries.filter(e =>
+        e.original.includes(query) || e.current.includes(query)
+      );
+      renderEntries(filtered);
+    });
+
+    // Async string extraction with incremental rendering & max 100 strings
+    function extractStrings(buf) {
+      return new Promise((resolve) => {
+        const minLength = 3;
+        const maxStrings = 100;
+        const decoder = new TextDecoder('ascii');
+        let i = 0;
+        const chunkSize = 50000;
+
+        entries = [];
+        stringList.innerHTML = '';
+        progressContainer.style.display = 'block';
+        updateProgress(0);
+
+        function processChunk() {
+          const end = Math.min(i + chunkSize, buf.length);
+
+          while (i < end) {
+            if (entries.length >= maxStrings) {
+              // Limit reached, stop early
+              updateProgress(100);
+              resolve();
+              return;
+            }
+
+            if (buf[i] >= 0x20 && buf[i] <= 0x7E) {
+              const start = i;
+              while (i < buf.length && buf[i] >= 0x20 && buf[i] <= 0x7E) i++;
+
+              if (i === buf.length || buf[i] === 0x00) {
+                const str = decoder.decode(buf.slice(start, i));
+                if (str.length >= minLength) {
+                  entries.push({ offset: start, original: str, current: str });
+                  // Incremental render new entry for performance:
+                  renderEntries(entries.filter(e => {
+                    // filter by current search term live, so only matching strings shown
+                    const q = searchInput.value;
+                    if (!q) return true;
+                    return e.original.includes(q) || e.current.includes(q);
+                  }));
+                }
+                if (i < buf.length && buf[i] === 0x00) i++;
+              }
+            } else {
+              i++;
+            }
+          }
+
+          updateProgress(Math.floor((i / buf.length) * 100));
+
+          if (i < buf.length) {
+            setTimeout(processChunk, 0);
+          } else {
+            resolve();
+          }
+        }
+
+        processChunk();
+      });
+    }
+
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+
+      entries = [];
+      stringList.innerHTML = '';
+      progressContainer.style.display = 'block';
+      updateProgress(0);
+
+      const reader = new FileReader();
+      reader.onload = async () => {
+        buffer = new Uint8Array(reader.result);
+        await extractStrings(buffer);
+        updateProgress(100);
+        setTimeout(() => {
+          progressContainer.style.display = 'none';
+        }, 400);
+      };
+      reader.readAsArrayBuffer(file);
     });
 
     downloadBtn.addEventListener('click', () => {
