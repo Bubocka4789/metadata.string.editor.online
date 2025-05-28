@@ -3,30 +3,34 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Metadata String Editor</title>
+<title>Metadata String Editor - Fixed</title>
 <style>
   body {
+    margin: 0; padding: 1rem;
     font-family: monospace;
     background: #121212;
     color: #eee;
-    padding: 1rem;
-    margin: 0;
+  }
+  h1 {
+    text-align: center;
   }
   #file-input, #search-input {
     width: 100%;
-    box-sizing: border-box;
-    margin-bottom: 0.5rem;
+    padding: 0.5rem;
     font-size: 1rem;
-    padding: 0.4rem;
+    margin-bottom: 0.5rem;
+    background: #222;
+    color: #eee;
+    border: 1px solid #555;
+    border-radius: 4px;
   }
   #progress-container {
-    width: 100%;
     background: #333;
-    height: 20px;
-    margin-bottom: 0.5rem;
-    display: none;
-    border-radius: 5px;
+    border-radius: 6px;
     overflow: hidden;
+    height: 20px;
+    margin-bottom: 1rem;
+    display: none;
   }
   #progress-bar {
     height: 100%;
@@ -34,17 +38,18 @@
     background: #4caf50;
     text-align: center;
     color: white;
+    font-weight: 600;
     font-size: 0.9rem;
     line-height: 20px;
     user-select: none;
   }
   #string-list {
-    max-height: 70vh;
+    max-height: 65vh;
     overflow-y: auto;
-    border: 1px solid #555;
+    border: 1px solid #444;
+    border-radius: 6px;
+    background: #1e1e1e;
     padding: 0.5rem;
-    border-radius: 5px;
-    background: #222;
   }
   .string-item {
     margin-bottom: 0.5rem;
@@ -64,14 +69,39 @@
     color: #eee;
     padding: 0.25rem 0.4rem;
   }
+  #pagination {
+    margin-top: 0.5rem;
+    text-align: center;
+  }
+  #pagination button {
+    background: #4caf50;
+    border: none;
+    color: white;
+    padding: 0.4rem 1rem;
+    margin: 0 0.2rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 1rem;
+  }
+  #pagination button:disabled {
+    background: #666;
+    cursor: default;
+  }
 </style>
 </head>
 <body>
+
+<h1>Metadata String Editor - Fixed</h1>
 
 <input type="file" id="file-input" accept=".dat" />
 <div id="progress-container"><div id="progress-bar">0%</div></div>
 <input type="text" id="search-input" placeholder="Search strings..." disabled />
 <div id="string-list"></div>
+<div id="pagination" style="display:none;">
+  <button id="prev-btn" disabled>Prev</button>
+  <span id="page-info"></span>
+  <button id="next-btn" disabled>Next</button>
+</div>
 
 <script>
   const fileInput = document.getElementById('file-input');
@@ -79,8 +109,15 @@
   const progressBar = document.getElementById('progress-bar');
   const searchInput = document.getElementById('search-input');
   const stringList = document.getElementById('string-list');
+  const pagination = document.getElementById('pagination');
+  const prevBtn = document.getElementById('prev-btn');
+  const nextBtn = document.getElementById('next-btn');
+  const pageInfo = document.getElementById('page-info');
 
   let allEntries = [];
+  let filteredEntries = [];
+  let currentPage = 1;
+  const pageSize = 100;
 
   function isPrintableAscii(byte) {
     return byte >= 0x20 && byte <= 0x7E;
@@ -91,9 +128,12 @@
     if (!file) return;
 
     allEntries = [];
+    filteredEntries = [];
+    currentPage = 1;
     stringList.innerHTML = '';
     searchInput.value = '';
     searchInput.disabled = true;
+    pagination.style.display = 'none';
     progressBar.style.width = '0%';
     progressBar.textContent = '0%';
     progressContainer.style.display = 'block';
@@ -101,7 +141,7 @@
     file.arrayBuffer().then(buffer => {
       const bytes = new Uint8Array(buffer);
       const decoder = new TextDecoder('ascii');
-      const chunkSize = 64 * 1024; // 64 KB chunks
+      const chunkSize = 64 * 1024; // 64KB chunks
       let offset = 0;
       let lastPercent = 0;
 
@@ -144,8 +184,11 @@
           progressBar.style.width = '100%';
           progressBar.textContent = 'Done';
           setTimeout(() => (progressContainer.style.display = 'none'), 400);
-          renderEntries(allEntries);
+          filteredEntries = allEntries.slice();
+          renderPage(currentPage);
           searchInput.disabled = false;
+          pagination.style.display = 'block';
+          updatePaginationButtons();
         }
       }
 
@@ -153,14 +196,23 @@
     });
   });
 
-  function renderEntries(entries) {
+  function renderPage(page) {
     stringList.innerHTML = '';
-    entries.forEach((entry, index) => {
+    const startIndex = (page - 1) * pageSize;
+    const endIndex = Math.min(startIndex + pageSize, filteredEntries.length);
+    if (filteredEntries.length === 0) {
+      stringList.innerHTML = '<p>No strings found.</p>';
+      pagination.style.display = 'none';
+      return;
+    }
+
+    for (let i = startIndex; i < endIndex; i++) {
+      const entry = filteredEntries[i];
       const div = document.createElement('div');
       div.className = 'string-item';
 
       const label = document.createElement('label');
-      label.textContent = `[${index}] (0x${entry.offset.toString(16)})`;
+      label.textContent = `[${i}] (0x${entry.offset.toString(16)})`;
 
       const input = document.createElement('input');
       input.type = 'text';
@@ -177,19 +229,41 @@
       div.appendChild(label);
       div.appendChild(input);
       stringList.appendChild(div);
-    });
+    }
+    pageInfo.textContent = `Page ${page} / ${Math.ceil(filteredEntries.length / pageSize)}`;
   }
+
+  function updatePaginationButtons() {
+    prevBtn.disabled = currentPage === 1;
+    nextBtn.disabled = currentPage >= Math.ceil(filteredEntries.length / pageSize);
+  }
+
+  prevBtn.addEventListener('click', () => {
+    if (currentPage > 1) {
+      currentPage--;
+      renderPage(currentPage);
+      updatePaginationButtons();
+      stringList.scrollTop = 0;
+    }
+  });
+
+  nextBtn.addEventListener('click', () => {
+    if (currentPage < Math.ceil(filteredEntries.length / pageSize)) {
+      currentPage++;
+      renderPage(currentPage);
+      updatePaginationButtons();
+      stringList.scrollTop = 0;
+    }
+  });
 
   searchInput.addEventListener('input', () => {
     const query = searchInput.value.toLowerCase();
-    Array.from(stringList.children).forEach((div, idx) => {
-      const entry = allEntries[idx];
-      if (!query || entry.current.toLowerCase().includes(query)) {
-        div.style.display = '';
-      } else {
-        div.style.display = 'none';
-      }
-    });
+    filteredEntries = allEntries.filter(entry =>
+      entry.current.toLowerCase().includes(query)
+    );
+    currentPage = 1;
+    renderPage(currentPage);
+    updatePaginationButtons();
   });
 </script>
 
