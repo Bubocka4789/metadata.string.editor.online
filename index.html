@@ -1,232 +1,91 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Metadata String Editor</title>
-<style>
-  /* same styling as before */
-  /* ... omitted for brevity, keep previous styles here ... */
-  /* just reuse previous style block */
-</style>
-</head>
-<body>
-<header>
-  <div>Metadata String Editor</div>
-  <button id="darkToggle">Dark Mode</button>
-</header>
-<main>
-  <input type="file" id="fileInput" accept=".dat" />
-  <div id="progressContainer"><div id="progressBar"></div></div>
-  <input type="text" id="searchInput" placeholder="Search strings (case sensitive)..." disabled />
-  <div id="stringList" tabindex="0"></div>
-  <button id="saveBtn" disabled>Save Patched File</button>
-</main>
-<footer>
-  &copy; 2025 Metadata String Editor
-</footer>
+import sys
+import re
+from dataclasses import dataclass
+from pathlib import Path
 
-<script>
-(() => {
-  const fileInput = document.getElementById('fileInput');
-  const progressContainer = document.getElementById('progressContainer');
-  const progressBar = document.getElementById('progressBar');
-  const searchInput = document.getElementById('searchInput');
-  const stringList = document.getElementById('stringList');
-  const saveBtn = document.getElementById('saveBtn');
-  const darkToggle = document.getElementById('darkToggle');
-  const body = document.body;
+PRINTABLE_RE = re.compile(rb"[\x20-\x7E]+\x00")
 
-  let binaryData = null;
-  let entries = [];
-  let filteredEntries = [];
+@dataclass
+class StringEntry:
+    offset: int
+    original: str
+    current: str
 
-  // Toggle Dark Mode
-  darkToggle.addEventListener('click', () => {
-    body.classList.toggle('dark');
-    darkToggle.textContent = body.classList.contains('dark') ? 'Light Mode' : 'Dark Mode';
-  });
+    @property
+    def length(self) -> int:
+        return len(self.original)
 
-  fileInput.addEventListener('change', () => {
-    const file = fileInput.files[0];
-    if (!file) return;
+def load_metadata(path: Path):
+    with open(path, "rb") as f:
+        data = f.read()
+    binary = bytearray(data)
+    entries = []
+    for match in PRINTABLE_RE.finditer(data):
+        string_bytes = match.group(0)[:-1]
+        try:
+            string = string_bytes.decode("ascii")
+        except UnicodeDecodeError:
+            continue
+        offset = match.start()
+        entries.append(StringEntry(offset, string, string))
+    return binary, entries
 
-    resetUI();
+def save_metadata(path: Path, binary: bytearray, entries):
+    for entry in entries:
+        if entry.current != entry.original:
+            new_bytes = entry.current.encode("ascii")
+            new_bytes += b"\x00" * (entry.length - len(entry.current))
+            binary[entry.offset : entry.offset + entry.length] = new_bytes
+    with open(path, "wb") as f:
+        f.write(binary)
 
-    const reader = new FileReader();
+def main():
+    import threading
 
-    reader.onprogress = (e) => {
-      if (e.lengthComputable) {
-        const percent = (e.loaded / e.total) * 100;
-        progressBar.style.width = percent + '%';
-        progressContainer.style.display = 'block';
-      }
-    };
+    if len(sys.argv) < 2:
+        print("Usage: python metadata_string_editor.py <metadata_file>")
+        return
 
-    reader.onload = () => {
-      progressBar.style.width = '100%';
+    path = Path(sys.argv[1])
+    if not path.exists():
+        print(f"File not found: {path}")
+        return
 
-      binaryData = new Uint8Array(reader.result);
+    print("Loading metadata file, please wait...\n")
+    binary, entries = load_metadata(path)
+    print(f"Loaded {len(entries)} strings from {path.name}\n")
 
-      // Async chunked string extraction to avoid freeze
-      entries = [];
-      const chunkSize = 50000; // bytes to process per chunk
-      let offset = 0;
+    def run_editor():
+        for idx, entry in enumerate(entries):
+            print(f"[{idx}] {entry.original}")
 
-      function processChunk() {
-        const start = offset;
-        const end = Math.min(offset + chunkSize, binaryData.length);
+        print("\nEnter the index of the string to edit (or 'q' to quit):")
+        while True:
+            cmd = input("> ").strip()
+            if cmd.lower() == 'q':
+                break
+            if not cmd.isdigit():
+                print("Invalid input. Enter a number or 'q'.")
+                continue
+            i = int(cmd)
+            if i < 0 or i >= len(entries):
+                print("Index out of range.")
+                continue
+            entry = entries[i]
+            print(f"Original: {entry.original}")
+            new_value = input(f"New (max {entry.length} chars): ").strip()
+            if len(new_value) > entry.length:
+                print("Too long.")
+                continue
+            entry.current = new_value
 
-        extractStringsFromRange(start, end);
+        out_path = path.with_name(path.stem + "_patched.dat")
+        save_metadata(out_path, binary, entries)
+        print(f"Saved patched metadata to {out_path}")
 
-        offset = end;
-        progressBar.style.width = (offset / binaryData.length) * 100 + '%';
+    editor_thread = threading.Thread(target=run_editor)
+    editor_thread.start()
+    editor_thread.join()
 
-        if (offset < binaryData.length) {
-          setTimeout(processChunk, 10); // yield to UI thread
-        } else {
-          progressBar.style.width = '100%';
-          progressContainer.style.display = 'none';
-
-          if (entries.length === 0) {
-            alert('No strings found in the file.');
-            searchInput.disabled = true;
-            saveBtn.disabled = true;
-          } else {
-            searchInput.disabled = false;
-            saveBtn.disabled = false;
-          }
-
-          filteredEntries = [...entries];
-          renderStringList();
-        }
-      }
-
-      // Extract strings in [start,end) range
-      function extractStringsFromRange(start, end) {
-        let i = start;
-        while (i < end) {
-          if (binaryData[i] >= 0x20 && binaryData[i] <= 0x7E) {
-            let strStart = i;
-            while (i < end && binaryData[i] >= 0x20 && binaryData[i] <= 0x7E) i++;
-            if (i < binaryData.length && binaryData[i] === 0x00) {
-              let strLen = i - strStart;
-              if (strLen >= 3) {
-                const strBytes = binaryData.subarray(strStart, i);
-                const str = new TextDecoder('ascii').decode(strBytes);
-                entries.push({
-                  offset: strStart,
-                  original: str,
-                  current: str,
-                  length: strLen
-                });
-              }
-            }
-          }
-          i++;
-        }
-      }
-
-      processChunk();
-    };
-
-    reader.onerror = () => {
-      alert('Failed to read file.');
-      progressContainer.style.display = 'none';
-    };
-
-    reader.readAsArrayBuffer(file);
-  });
-
-  function resetUI() {
-    progressBar.style.width = '0%';
-    progressContainer.style.display = 'none';
-    stringList.innerHTML = '';
-    searchInput.value = '';
-    searchInput.disabled = true;
-    saveBtn.disabled = true;
-    entries = [];
-    filteredEntries = [];
-    binaryData = null;
-  }
-
-  // Render list with inline editing
-  function renderStringList() {
-    stringList.innerHTML = '';
-    filteredEntries.forEach((entry, idx) => {
-      const div = document.createElement('div');
-      div.className = 'stringEntry';
-
-      const indexSpan = document.createElement('span');
-      indexSpan.className = 'stringIndex';
-      indexSpan.textContent = idx;
-
-      const textSpan = document.createElement('span');
-      textSpan.className = 'stringText';
-
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.value = entry.current;
-      input.maxLength = entry.length;
-      input.title = `Max length: ${entry.length}`;
-      input.style.color = entry.current === entry.original ? '' : 'orange';
-
-      input.addEventListener('input', () => {
-        if (input.value.length <= entry.length) {
-          entry.current = input.value;
-          input.style.color = entry.current === entry.original ? '' : 'orange';
-        } else {
-          input.value = entry.current; // revert if too long
-        }
-      });
-
-      textSpan.appendChild(input);
-      div.appendChild(indexSpan);
-      div.appendChild(textSpan);
-
-      stringList.appendChild(div);
-    });
-  }
-
-  // Search handler (case sensitive)
-  searchInput.addEventListener('input', () => {
-    const query = searchInput.value;
-    if (query === '') {
-      filteredEntries = [...entries];
-    } else {
-      filteredEntries = entries.filter(e => e.current.includes(query));
-    }
-    renderStringList();
-  });
-
-  // Save patched file
-  saveBtn.addEventListener('click', () => {
-    if (!binaryData) return;
-
-    // Copy binary data so we can patch it
-    const patched = new Uint8Array(binaryData);
-
-    for (const e of entries) {
-      if (e.current !== e.original) {
-        const encoded = new TextEncoder().encode(e.current);
-        for (let i = 0; i < e.length; i++) {
-          patched[e.offset + i] = i < encoded.length ? encoded[i] : 0x00;
-        }
-      }
-    }
-
-    const blob = new Blob([patched], { type: 'application/octet-stream' });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'patched_global-metadata.dat';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  });
-})();
-</script>
-</body>
-</html>
+if __name__ == "__main__":
+    main()
