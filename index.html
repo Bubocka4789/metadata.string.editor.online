@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta charset="UTF-8">
 <title>MetaDataStringEditor Web Clone</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
   body { font-family: monospace; margin: 0; background: #111; color: #eee; }
-  header { padding: 0.5em 1em; background: #222; display: flex; align-items: center; gap: 1em; flex-wrap: wrap; }
+  header { padding: 0.5em 1em; background: #222; position: relative; }
   input[type=file] { margin-right: 1em; }
   #progressBar {
     width: 100%; height: 20px; background: #333; margin: 0.5em 0;
@@ -18,6 +18,9 @@
   #search {
     width: 300px; padding: 0.3em; margin-bottom: 1em;
     background: #222; border: 1px solid #555; color: #eee;
+  }
+  #versionLabel {
+    position: absolute; top: 5px; right: 10px; font-size: 10px; color: #888;
   }
   #container {
     display: flex;
@@ -54,15 +57,6 @@
     flex: 1;
     overflow: auto;
   }
-  #versionLabel {
-    font-size: 10px;
-    color: #666;
-    position: fixed;
-    top: 4px;
-    right: 6px;
-    user-select: none;
-    pointer-events: none;
-  }
 </style>
 </head>
 <body>
@@ -71,6 +65,7 @@
   <input type="text" id="search" placeholder="Case-sensitive search..." />
   <button id="saveBtn" disabled>Save Modified File</button>
   <div id="progressBar"><div></div></div>
+  <div id="versionLabel">v2025.05.28</div>
 </header>
 <div id="container">
   <div id="stringsTable">
@@ -82,7 +77,6 @@
     </table>
   </div>
 </div>
-<div id="versionLabel">Version: 1.0.1 (GorillaTag UTF16 fix)</div>
 
 <script>
 (() => {
@@ -92,228 +86,151 @@
   const progressBar = document.getElementById('progressBar').firstElementChild;
   const tableBody = document.getElementById('tableBody');
 
-  let arrayBuffer;
-  let dataView;
-  let stringLiteralCount = 0;
-  let stringLiteralOffset = 0;
-  let stringLiterals = []; // { offset, length (chars), original, modified }
-  let modifiedCount = 0;
+  let arrayBuffer, dataView;
+  let stringLiterals = [];
 
-  // Read UTF-16LE string from offset, length in characters
-  function readString(offset, length) {
-    if (offset + length * 2 > dataView.byteLength) return '';
-    let chars = [];
-    for (let i = 0; i < length; i++) {
-      const charCode = dataView.getUint16(offset + i * 2, true);
-      if (charCode === 0) break;
-      chars.push(String.fromCharCode(charCode));
-    }
-    return chars.join('');
+  function readPrintableString(offset, length) {
+    const bytes = new Uint8Array(arrayBuffer, offset, length);
+    const decoded = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+    return decoded.replace(/[^\x20-\x7E]+/g, ''); // filter to printable ASCII
   }
 
-  // UTF-16LE encode string for saving
-  function encodeUTF16LE(str) {
-    const buf = new Uint8Array(str.length * 2);
-    for (let i = 0; i < str.length; i++) {
-      const code = str.charCodeAt(i);
-      buf[i * 2] = code & 0xFF;
-      buf[i * 2 + 1] = code >> 8;
-    }
-    return buf;
-  }
+  function detectIl2CppStringLiteralTable() {
+    // Known offsets and limits from reverse engineering Gorilla Tag metadata
+    const searchStart = 0;
+    const searchEnd = Math.min(arrayBuffer.byteLength - 8, 1_000_000);
+    const table = [];
 
-  // Try multiple known offsets for stringLiteralCount & stringLiteralOffset in metadata header
-  function detectStringLiteralTableOffsets() {
-    // Common offsets used by various IL2CPP metadata versions
-    const candidates = [
-      {count: 0x50, offset: 0x54},
-      {count: 0x58, offset: 0x5C},
-      {count: 0x40, offset: 0x44},
-      {count: 0x48, offset: 0x4C},
-      {count: 0x60, offset: 0x64}
-    ];
-    for (const c of candidates) {
-      if (arrayBuffer.byteLength > c.offset + 4) {
-        const count = dataView.getUint32(c.count, true);
-        const offset = dataView.getUint32(c.offset, true);
-        if (
-          count > 0 &&
-          offset > 0 &&
-          offset + count * 8 <= arrayBuffer.byteLength &&
-          count < 10_000_000
-        ) {
-          return {count, offset};
+    for (let i = searchStart; i < searchEnd; i += 8) {
+      const offset = new DataView(arrayBuffer).getUint32(i, true);
+      const length = new DataView(arrayBuffer).getInt32(i + 4, true);
+
+      if (
+        offset > 0 &&
+        length > 0 &&
+        offset + length < arrayBuffer.byteLength &&
+        length < 1000
+      ) {
+        const preview = readPrintableString(offset, length);
+        if (preview && preview.match(/[A-Za-z0-9 _\-.,!?]/) && preview.length > 2) {
+          table.push({ i, offset, length, original: preview, modified: preview });
         }
       }
-    }
-    return null;
-  }
 
-  // Extract strings in batches to avoid freezing UI
-  async function extractStrings(batchSize = 200) {
-    stringLiterals = [];
-    let extracted = 0;
-    while (extracted < stringLiteralCount) {
-      let batchEnd = Math.min(extracted + batchSize, stringLiteralCount);
-      for (let i = extracted; i < batchEnd; i++) {
-        const entryOffset = stringLiteralOffset + i * 8;
-        if (entryOffset + 8 > dataView.byteLength) break;
-        const stringOffset = dataView.getUint32(entryOffset, true);
-        const stringLength = dataView.getInt32(entryOffset + 4, true);
-        if (
-          stringOffset > 0 &&
-          stringLength > 0 &&
-          stringOffset + stringLength * 2 <= arrayBuffer.byteLength
-        ) {
-          const original = readString(stringOffset, stringLength);
-          stringLiterals.push({
-            offset: stringOffset,
-            length: stringLength,
-            original,
-            modified: original
-          });
-        }
+      if (table.length > 0 && table.length % 500 === 0) {
+        updateProgress(i / searchEnd);
       }
-      extracted = batchEnd;
-      updateTable();
-      updateProgress(extracted / stringLiteralCount);
-      await new Promise(r => setTimeout(r, 0));
     }
-    updateProgress(1);
-    saveBtn.disabled = false;
+
+    if (!table.length) return null;
+    return table;
   }
 
-  // Render table rows filtered by search term
+  function updateProgress(ratio) {
+    progressBar.style.width = Math.floor(ratio * 100) + '%';
+  }
+
   function updateTable() {
     const filter = searchInput.value;
     tableBody.innerHTML = '';
     const fragment = document.createDocumentFragment();
-    for (let i = 0; i < stringLiterals.length; i++) {
-      const s = stringLiterals[i];
-      if (filter && !s.original.includes(filter) && !s.modified.includes(filter)) continue;
-      const tr = document.createElement('tr');
 
-      // Offset hex
+    for (const s of stringLiterals) {
+      if (filter && !s.original.includes(filter) && !s.modified.includes(filter)) continue;
+
+      const tr = document.createElement('tr');
       const tdOff = document.createElement('td');
       tdOff.textContent = '0x' + s.offset.toString(16).padStart(8, '0');
-      tr.appendChild(tdOff);
-
-      // Original string (readonly)
       const tdOrig = document.createElement('td');
       tdOrig.textContent = s.original;
-      tr.appendChild(tdOrig);
-
-      // Modified string (editable)
       const tdMod = document.createElement('td');
       const input = document.createElement('input');
       input.type = 'text';
       input.value = s.modified;
       input.spellcheck = false;
-      input.style.caretColor = '#76aaff';
-      input.addEventListener('input', e => {
-        s.modified = e.target.value;
-        modifiedCount = stringLiterals.filter(x => x.modified !== x.original).length;
-      });
+      input.addEventListener('input', e => s.modified = e.target.value);
       tdMod.appendChild(input);
+      tr.appendChild(tdOff);
+      tr.appendChild(tdOrig);
       tr.appendChild(tdMod);
-
       fragment.appendChild(tr);
     }
+
     tableBody.appendChild(fragment);
   }
 
-  // Update progress bar width
-  function updateProgress(ratio) {
-    progressBar.style.width = Math.floor(ratio * 100) + '%';
-  }
-
-  // Save modified strings back to file buffer, overwrite if fits else append and update pointer
   function saveModifiedFile() {
-    let newBuffer = new Uint8Array(arrayBuffer);
+    const newBuffer = new Uint8Array(arrayBuffer);
     let appendOffset = arrayBuffer.byteLength;
-    let appendedData = [];
+    const appendedData = [];
 
-    for (let i = 0; i < stringLiterals.length; i++) {
-      const s = stringLiterals[i];
+    for (const s of stringLiterals) {
       if (s.modified === s.original) continue;
 
-      const oldByteLen = s.length * 2;
-      const newBytes = encodeUTF16LE(s.modified);
-      if (newBytes.length <= oldByteLen) {
-        // Overwrite in place, pad zeros if shorter
-        newBuffer.set(newBytes, s.offset);
-        if (newBytes.length < oldByteLen) {
-          newBuffer.fill(0, s.offset + newBytes.length, s.offset + oldByteLen);
-        }
+      const modBytes = new TextEncoder().encode(s.modified);
+      const entryOffset = s.i;
+
+      if (modBytes.length <= s.length) {
+        newBuffer.set(modBytes, s.offset);
+        for (let i = modBytes.length; i < s.length; i++) newBuffer[s.offset + i] = 0;
       } else {
-        // Append at end
-        appendedData.push({index: i, data: newBytes});
+        const newOffset = appendOffset;
+        appendOffset += modBytes.length;
+        appendedData.push({ offset: newOffset, bytes: modBytes });
+        new DataView(newBuffer.buffer).setUint32(entryOffset, newOffset, true);
+        new DataView(newBuffer.buffer).setInt32(entryOffset + 4, modBytes.length, true);
       }
     }
 
-    // Append new longer strings at EOF and update pointers
-    for (const {index, data} of appendedData) {
-      // Write appended string at appendOffset
-      newBuffer = new Uint8Array([...newBuffer, ...data, 0, 0]); // null terminate UTF16LE (2 bytes)
-      const newOffset = appendOffset;
-      appendOffset += data.length + 2;
-
-      // Update pointer in string literal table
-      const entryOffset = stringLiteralOffset + index * 8;
-      const dv = new DataView(newBuffer.buffer);
-      dv.setUint32(entryOffset, newOffset, true);
-      dv.setInt32(entryOffset + 4, stringLiterals[index].modified.length, true);
-
-      // Update in-memory for next save (optional)
-      stringLiterals[index].offset = newOffset;
-      stringLiterals[index].length = stringLiterals[index].modified.length;
-    }
-
-    // Trigger download
-    const blob = new Blob([newBuffer], {type: 'application/octet-stream'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'global-metadata_modified.dat';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => {
+    if (appendedData.length > 0) {
+      const finalBuffer = new Uint8Array(appendOffset);
+      finalBuffer.set(newBuffer);
+      for (const d of appendedData) finalBuffer.set(d.bytes, d.offset);
+      const blob = new Blob([finalBuffer], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'global-metadata.modified.dat';
+      a.click();
       URL.revokeObjectURL(url);
-      a.remove();
-    }, 100);
+    } else {
+      const blob = new Blob([newBuffer], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'global-metadata.modified.dat';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
   }
 
-  // Main file load handler
-  fileInput.addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+  fileInput.addEventListener('change', async () => {
+    if (!fileInput.files.length) return;
     saveBtn.disabled = true;
-    progressBar.style.width = '0%';
     tableBody.innerHTML = '';
+    updateProgress(0);
 
+    const file = fileInput.files[0];
     arrayBuffer = await file.arrayBuffer();
     dataView = new DataView(arrayBuffer);
 
-    const detected = detectStringLiteralTableOffsets();
-    if (!detected) {
-      alert('Failed to detect Il2CppStringLiteral table offsets.\nThis file may not be supported.');
+    const detectedTable = detectIl2CppStringLiteralTable();
+    if (!detectedTable) {
+      alert("Failed to detect Il2CppStringLiteral table offsets.");
       return;
     }
-    stringLiteralCount = detected.count;
-    stringLiteralOffset = detected.offset;
 
-    await extractStrings();
+    stringLiterals = detectedTable;
+    updateTable();
+    saveBtn.disabled = false;
+    updateProgress(1);
   });
 
-  // Search input handler
   searchInput.addEventListener('input', () => {
     updateTable();
   });
 
-  saveBtn.addEventListener('click', () => {
-    saveModifiedFile();
-  });
-
+  saveBtn.addEventListener('click', saveModifiedFile);
 })();
 </script>
 </body>
