@@ -3,135 +3,185 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Ugly Metadata Editor with Search</title>
+<title>IL2CCP Metadata String Editor</title>
 <style>
   body {
     font-family: monospace;
-    background: white;
-    color: black;
-    padding: 10px;
+    background: #121212;
+    color: #ddd;
+    margin: 1rem;
+  }
+  h1 {
+    text-align: center;
   }
   #file-input {
-    font-size: 20px;
-    margin-bottom: 10px;
+    display: block;
+    margin: 1rem auto;
+  }
+  #progress-container {
+    width: 100%;
+    background: #333;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 1rem;
+    height: 20px;
+    display: none;
+  }
+  #progress-bar {
+    height: 100%;
+    width: 0;
+    background: #4caf50;
+    color: white;
+    text-align: center;
+    font-size: 12px;
+    line-height: 20px;
+    user-select: none;
   }
   #search-input {
-    font-size: 20px;
     width: 100%;
-    margin-bottom: 10px;
-    border: 2px solid red;
-    padding: 5px;
-    background: yellow;
-    color: black;
+    padding: 8px;
+    font-size: 16px;
+    margin-bottom: 1rem;
+    border-radius: 5px;
+    border: none;
   }
   #string-list {
-    max-height: 400px;
-    overflow-y: scroll;
-    border: 2px solid black;
-    padding: 5px;
+    max-height: 70vh;
+    overflow-y: auto;
+    border: 1px solid #555;
+    padding: 8px;
+    border-radius: 5px;
+    background: #222;
   }
   .string-item {
-    margin-bottom: 8px;
+    margin-bottom: 10px;
   }
-  .string-label {
-    font-weight: bold;
+  .string-item label {
+    display: block;
+    color: #90caf9;
+    font-size: 0.8rem;
+    margin-bottom: 2px;
   }
-  .string-input {
-    font-family: monospace;
-    font-size: 16px;
+  .string-item input {
     width: 100%;
-    box-sizing: border-box;
+    font-family: monospace;
+    font-size: 14px;
+    background: #333;
+    border: 1px solid #555;
+    border-radius: 4px;
+    color: #eee;
+    padding: 4px 6px;
   }
 </style>
 </head>
 <body>
 
+<h1>IL2CCP Metadata String Editor</h1>
 <input type="file" id="file-input" accept=".dat" />
-<input type="text" id="search-input" placeholder="Type here to search strings..." />
-
+<div id="progress-container"><div id="progress-bar">0%</div></div>
+<input type="text" id="search-input" placeholder="Search strings..." />
 <div id="string-list"></div>
 
 <script>
-const fileInput = document.getElementById('file-input');
-const searchInput = document.getElementById('search-input');
-const stringList = document.getElementById('string-list');
+  const fileInput = document.getElementById('file-input');
+  const progressContainer = document.getElementById('progress-container');
+  const progressBar = document.getElementById('progress-bar');
+  const searchInput = document.getElementById('search-input');
+  const stringList = document.getElementById('string-list');
 
-let allEntries = [];
+  let allEntries = [];
 
-fileInput.addEventListener('change', () => {
-  const file = fileInput.files[0];
-  if (!file) return;
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files[0];
+    if (!file) return;
 
-  stringList.innerHTML = '';
-  allEntries = [];
+    allEntries = [];
+    stringList.innerHTML = '';
+    progressBar.style.width = '0%';
+    progressBar.textContent = '0%';
+    progressContainer.style.display = 'block';
+    searchInput.value = '';
 
-  file.arrayBuffer().then(buf => {
-    const bytes = new Uint8Array(buf);
-    const decoder = new TextDecoder('ascii');
+    file.arrayBuffer().then(buffer => {
+      const bytes = new Uint8Array(buffer);
+      const decoder = new TextDecoder('ascii');
+      const chunkSize = 64 * 1024; // 64 KB chunks
+      let offset = 0;
 
-    let i = 0;
-    while (i < bytes.length) {
-      if (bytes[i] >= 0x20 && bytes[i] <= 0x7E) {
-        let start = i;
-        while (i < bytes.length && bytes[i] >= 0x20 && bytes[i] <= 0x7E) i++;
-        if (i < bytes.length && bytes[i] === 0x00) {
-          const str = decoder.decode(bytes.subarray(start, i));
-          if (str.length >= 3) {
-            allEntries.push({ offset: start, original: str, current: str });
+      function processChunk() {
+        const end = Math.min(offset + chunkSize, bytes.length);
+        let i = offset;
+        while (i < end) {
+          if (bytes[i] >= 0x20 && bytes[i] <= 0x7E) { // printable ASCII range
+            const start = i;
+            while (i < bytes.length && bytes[i] >= 0x20 && bytes[i] <= 0x7E) i++;
+            if (i < bytes.length && bytes[i] === 0x00) {
+              const str = decoder.decode(bytes.subarray(start, i));
+              if (str.length >= 3) {
+                allEntries.push({ offset: start, original: str, current: str });
+              }
+              i++;
+            }
+          } else {
+            i++;
           }
-          i++;
-        } else {
-          i++;
         }
-      } else {
-        i++;
+        offset = end;
+        const percent = Math.floor((offset / bytes.length) * 100);
+        progressBar.style.width = percent + '%';
+        progressBar.textContent = percent + '%';
+
+        if (offset < bytes.length) {
+          setTimeout(processChunk, 0); // Yield to UI thread to avoid freezing
+        } else {
+          progressBar.style.width = '100%';
+          progressBar.textContent = 'Done';
+          setTimeout(() => progressContainer.style.display = 'none', 500);
+          renderEntries(allEntries);
+        }
       }
-    }
-    renderEntries(allEntries);
+      processChunk();
+    });
   });
-});
 
-function renderEntries(entries) {
-  stringList.innerHTML = '';
-  entries.forEach((e, idx) => {
-    const div = document.createElement('div');
-    div.className = 'string-item';
+  function renderEntries(entries) {
+    stringList.innerHTML = '';
+    entries.forEach((entry, index) => {
+      const div = document.createElement('div');
+      div.className = 'string-item';
 
-    const label = document.createElement('div');
-    label.className = 'string-label';
-    label.textContent = `[${idx}] (0x${e.offset.toString(16)})`;
+      const label = document.createElement('label');
+      label.textContent = `[${index}] (0x${entry.offset.toString(16)})`;
 
-    const input = document.createElement('input');
-    input.className = 'string-input';
-    input.type = 'text';
-    input.value = e.current;
-    input.maxLength = e.original.length;
-    input.addEventListener('input', () => {
-      if (input.value.length <= e.original.length) {
-        e.current = input.value;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = entry.current;
+      input.maxLength = entry.original.length;
+      input.addEventListener('input', () => {
+        if (input.value.length <= entry.original.length) {
+          entry.current = input.value;
+        } else {
+          input.value = entry.current; // revert if too long
+        }
+      });
+
+      div.appendChild(label);
+      div.appendChild(input);
+      stringList.appendChild(div);
+    });
+  }
+
+  searchInput.addEventListener('input', () => {
+    const query = searchInput.value.toLowerCase();
+    Array.from(stringList.children).forEach((div, idx) => {
+      const entry = allEntries[idx];
+      if (!query || entry.current.toLowerCase().includes(query)) {
+        div.style.display = '';
       } else {
-        input.value = e.current;
+        div.style.display = 'none';
       }
     });
-
-    div.appendChild(label);
-    div.appendChild(input);
-    stringList.appendChild(div);
   });
-}
-
-searchInput.addEventListener('input', () => {
-  const query = searchInput.value.toLowerCase();
-  const children = Array.from(stringList.children);
-  children.forEach((div, i) => {
-    const e = allEntries[i];
-    if (!query || e.current.toLowerCase().includes(query)) {
-      div.style.display = '';
-    } else {
-      div.style.display = 'none';
-    }
-  });
-});
 </script>
 
 </body>
