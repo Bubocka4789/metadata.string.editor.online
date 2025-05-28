@@ -1,350 +1,420 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Metadata String Editor</title>
-  <style>
-    body {
-      margin: 0;
-      font-family: system-ui, sans-serif;
-      background: #121212;
-      color: #e0e0e0;
-      padding: 1rem;
-      display: flex;
-      flex-direction: column;
-      min-height: 100vh;
-    }
-    h1 {
-      text-align: center;
-      margin-bottom: 1rem;
-    }
-    #controls {
-      display: flex;
-      gap: 1rem;
-      flex-wrap: wrap;
-      justify-content: center;
-      margin-bottom: 1rem;
-    }
-    input[type="file"],
-    input[type="text"],
-    button {
-      background: #000;
-      color: #eee;
-      border: 1px solid #555;
-      border-radius: 4px;
-      padding: 0.4rem 0.6rem;
-      font-size: 1rem;
-      outline-offset: 2px;
-      transition: border-color 0.2s ease;
-    }
-    input[type="file"]:focus,
-    input[type="text"]:focus,
-    button:focus {
-      border-color: #4caf50;
-    }
-    #progress-container {
-      display: none;
-      width: 100%;
-      max-width: 600px;
-      margin: 0 auto 1rem auto;
-      background: #333;
-      border-radius: 8px;
-      overflow: hidden;
-      height: 20px;
-    }
-    #progress-bar {
-      height: 100%;
-      width: 0%;
-      background: #4caf50;
-      text-align: center;
-      color: #fff;
-      font-weight: bold;
-      line-height: 20px;
-      user-select: none;
-      transition: width 0.2s ease;
-      font-size: 0.9rem;
-    }
-    #string-list {
-      max-height: 60vh;
-      overflow-y: auto;
-      border: 1px solid #444;
-      border-radius: 6px;
-      padding: 0.5rem;
-      background: #1e1e1e;
-      flex-grow: 1;
-      user-select: text;
-      position: relative;
-      font-family: monospace;
-    }
-    .string-item {
-      background: #2a2a2a;
-      padding: 0.5rem;
-      border-radius: 4px;
-      margin-bottom: 0.5rem;
-      display: flex;
-      gap: 1rem;
-      align-items: center;
-      flex-wrap: wrap;
-      min-height: 48px;
-    }
-    .string-label {
-      flex-basis: 100%;
-      color: #90caf9;
-      font-size: 0.85rem;
-      margin-bottom: 0.25rem;
-      user-select: text;
-    }
-    .string-col {
-      flex: 1 1 45%;
-      display: flex;
-      flex-direction: column;
-      min-width: 200px;
-    }
-    .string-col label {
-      font-size: 0.75rem;
-      margin-bottom: 0.15rem;
-      color: #bbb;
-      user-select: none;
-    }
-    .string-col input {
-      width: 100%;
-      font-family: monospace;
-      font-size: 1rem;
-      background: #000;
-      border: 1px solid #555;
-      border-radius: 4px;
-      color: #eee;
-      padding: 0.3rem 0.5rem;
-      transition: border-color 0.2s ease;
-    }
-    .string-col input:focus {
-      border-color: #4caf50;
-      outline: none;
-    }
-    .string-col input[readonly] {
-      background: #222;
-      color: #777;
-      cursor: default;
-    }
-    @media (max-width: 600px) {
-      .string-col {
-        flex-basis: 100%;
-      }
-    }
-  </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Metadata String + Full File Editor</title>
+<style>
+  body {
+    margin: 0;
+    font-family: system-ui, sans-serif;
+    background: #121212;
+    color: #e0e0e0;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+  h1 {
+    text-align: center;
+    margin-bottom: 1rem;
+  }
+  #controls {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin-bottom: 1rem;
+  }
+  input[type="file"],
+  input[type="text"],
+  button {
+    background: #000;
+    color: #eee;
+    border: 1px solid #555;
+    border-radius: 4px;
+    padding: 0.4rem 0.6rem;
+    font-size: 1rem;
+    outline-offset: 2px;
+  }
+  input[type="file"]:focus,
+  input[type="text"]:focus,
+  button:focus {
+    border-color: #4caf50;
+  }
+  #progress-container {
+    width: 100%;
+    max-width: 600px;
+    margin: 0 auto 1rem auto;
+    background: #333;
+    border-radius: 8px;
+    overflow: hidden;
+    height: 20px;
+  }
+  #progress-bar {
+    height: 100%;
+    width: 0%;
+    background: #4caf50;
+    text-align: center;
+    color: #fff;
+    font-weight: bold;
+    line-height: 20px;
+    user-select: none;
+    transition: width 0.2s ease;
+    font-size: 0.9rem;
+  }
+  #string-list {
+    max-height: 35vh;
+    overflow-y: auto;
+    border: 1px solid #444;
+    border-radius: 6px;
+    padding: 0.5rem;
+    background: #1e1e1e;
+    flex-grow: 1;
+    user-select: text;
+    font-family: monospace;
+    margin-bottom: 1rem;
+  }
+  .string-item {
+    background: #2a2a2a;
+    padding: 0.5rem;
+    border-radius: 4px;
+    margin-bottom: 0.5rem;
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    flex-wrap: wrap;
+    min-height: 48px;
+  }
+  .string-label {
+    flex-basis: 100%;
+    color: #90caf9;
+    font-size: 0.85rem;
+    margin-bottom: 0.25rem;
+    user-select: text;
+  }
+  .string-col {
+    flex: 1 1 45%;
+    display: flex;
+    flex-direction: column;
+    min-width: 200px;
+  }
+  .string-col label {
+    font-size: 0.75rem;
+    margin-bottom: 0.15rem;
+    color: #bbb;
+    user-select: none;
+  }
+  .string-col input {
+    width: 100%;
+    font-family: monospace;
+    font-size: 1rem;
+    background: #000;
+    border: 1px solid #555;
+    border-radius: 4px;
+    color: #eee;
+    padding: 0.3rem 0.5rem;
+    transition: border-color 0.2s ease;
+  }
+  .string-col input:focus {
+    border-color: #4caf50;
+    outline: none;
+  }
+  .string-col input[readonly] {
+    background: #222;
+    color: #777;
+    cursor: default;
+  }
+  #full-file-editor-container {
+    flex-grow: 1;
+    border: 1px solid #444;
+    border-radius: 6px;
+    background: #1e1e1e;
+    display: flex;
+    flex-direction: column;
+    max-height: 50vh;
+  }
+  #full-file-editor-label {
+    padding: 0.5rem;
+    font-size: 1rem;
+    color: #90caf9;
+    border-bottom: 1px solid #444;
+    user-select: none;
+  }
+  #full-file-editor {
+    flex-grow: 1;
+    background: #000;
+    color: #eee;
+    font-family: monospace;
+    font-size: 1rem;
+    border: none;
+    padding: 0.5rem;
+    resize: none;
+    overflow: auto;
+    outline: none;
+  }
+</style>
 </head>
 <body>
-  <h1>Metadata String Editor</h1>
-  <div id="controls">
-    <input type="file" id="file-input" accept=".dat" aria-label="Load .dat file" />
-    <input type="text" id="search" placeholder="Search..." aria-label="Search strings" />
-    <button id="download-btn" aria-label="Download modified file">Download</button>
-  </div>
-  <div id="progress-container" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-    <div id="progress-bar">0%</div>
-  </div>
-  <div id="string-list" aria-live="polite" aria-relevant="additions"></div>
+<h1>Metadata String + Full File Editor</h1>
+<div id="controls">
+  <input type="file" id="file-input" accept=".dat" aria-label="Load .dat file" />
+  <input type="text" id="search" placeholder="Search strings (case sensitive)" aria-label="Search strings" />
+  <button id="download-btn" aria-label="Download modified file">Download</button>
+</div>
+<div id="progress-container" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+  <div id="progress-bar">0%</div>
+</div>
 
-  <script>
-    const fileInput = document.getElementById('file-input');
-    const progressBar = document.getElementById('progress-bar');
-    const progressContainer = document.getElementById('progress-container');
-    const stringList = document.getElementById('string-list');
-    const searchInput = document.getElementById('search');
-    const downloadBtn = document.getElementById('download-btn');
+<div id="string-list" aria-live="polite" aria-relevant="additions"></div>
 
-    let entries = [];
-    let buffer = null;
-    let filteredEntries = null;
+<div id="full-file-editor-container" style="display:none;">
+  <div id="full-file-editor-label">Full File Editor (text)</div>
+  <textarea id="full-file-editor" spellcheck="false" aria-label="Full file editor"></textarea>
+</div>
 
-    // Debounce helper
-    function debounce(fn, delay) {
-      let timer = null;
-      return (...args) => {
-        clearTimeout(timer);
-        timer = setTimeout(() => fn(...args), delay);
-      };
-    }
+<script>
+  const fileInput = document.getElementById('file-input');
+  const progressBar = document.getElementById('progress-bar');
+  const progressContainer = document.getElementById('progress-container');
+  const stringList = document.getElementById('string-list');
+  const searchInput = document.getElementById('search');
+  const downloadBtn = document.getElementById('download-btn');
 
-    fileInput.addEventListener('change', () => {
-      const file = fileInput.files[0];
-      if (!file) return;
+  const fullFileEditorContainer = document.getElementById('full-file-editor-container');
+  const fullFileEditor = document.getElementById('full-file-editor');
 
-      entries = [];
-      filteredEntries = null;
-      stringList.innerHTML = '';
-      progressContainer.style.display = 'block';
-      updateProgress(0);
+  let entries = [];
+  let buffer = null; // Uint8Array
+  let filteredEntries = null;
+  let fileString = ''; // whole file as string (ASCII subset)
+  let isUpdatingFullFile = false;
 
-      const reader = new FileReader();
-      reader.onload = () => {
-        buffer = new Uint8Array(reader.result);
-        extractStrings(buffer, (results) => {
-          entries = results;
-          filteredEntries = null;
-          renderEntries(entries);
-          updateProgress(100);
-          setTimeout(() => {
-            progressContainer.style.display = 'none';
-          }, 400);
-        });
-      };
-      reader.readAsArrayBuffer(file);
-    });
+  // Debounce helper
+  function debounce(fn, delay) {
+    let timer = null;
+    return (...args) => {
+      clearTimeout(timer);
+      timer = setTimeout(() => fn(...args), delay);
+    };
+  }
 
-    function updateProgress(percent) {
-      progressBar.style.width = percent + '%';
-      progressBar.textContent = percent + '%';
-      progressContainer.setAttribute('aria-valuenow', percent);
-    }
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files[0];
+    if (!file) return;
 
-    // Extract ASCII strings 3+ chars ending with 0x00 or EOF, emit in batches, limit batch 100 max
-    function extractStrings(buf, callback) {
-      const strings = [];
-      const minLength = 3;
-      const decoder = new TextDecoder('ascii');
-      let i = 0;
-      const chunkSize = 200000; // bigger chunk for speed
-      const batchLimit = 100; // max strings rendered per batch
+    entries = [];
+    filteredEntries = null;
+    stringList.innerHTML = '';
+    fullFileEditor.value = '';
+    fullFileEditorContainer.style.display = 'none';
+    updateProgress(0);
+    progressContainer.style.display = 'block';
 
-      function processChunk() {
-        const end = Math.min(i + chunkSize, buf.length);
-
-        while (i < end) {
-          if (buf[i] >= 0x20 && buf[i] <= 0x7E) {
-            const start = i;
-            while (i < buf.length && buf[i] >= 0x20 && buf[i] <= 0x7E) i++;
-
-            if (i === buf.length || buf[i] === 0x00) {
-              const str = decoder.decode(buf.slice(start, i));
-              if (str.length >= minLength) {
-                strings.push({ offset: start, original: str, current: str });
-                // Render progressively every batchLimit strings
-                if (strings.length % batchLimit === 0) {
-                  renderEntries(strings);
-                }
-              }
-              if (i < buf.length && buf[i] === 0x00) i++; 
-            }
-          } else {
-            i++;
-          }
-        }
-
-        updateProgress(Math.floor((i / buf.length) * 100));
-
-        if (i < buf.length) {
-          setTimeout(processChunk, 0);
-        } else {
-          callback(strings);
-        }
-      }
-
-      processChunk();
-    }
-
-    // Render visible entries only (virtual rendering)
-    function renderEntries(list) {
-      stringList.innerHTML = '';
-      if (!list || list.length === 0) {
-        stringList.textContent = 'No strings found.';
-        return;
-      }
-
-      const fragment = document.createDocumentFragment();
-      // show max 500 at once to keep UI smooth, slice here
-      const maxShow = 500;
-      const toRender = list.length > maxShow ? list.slice(0, maxShow) : list;
-
-      toRender.forEach((entry) => {
-        const div = document.createElement('div');
-        div.className = 'string-item';
-
-        const label = document.createElement('div');
-        label.className = 'string-label';
-        label.textContent = `[0x${entry.offset.toString(16).toUpperCase().padStart(8, '0')}]`;
-
-        const originalCol = document.createElement('div');
-        originalCol.className = 'string-col';
-        const originalLabel = document.createElement('label');
-        originalLabel.textContent = 'Original';
-        const originalInput = document.createElement('input');
-        originalInput.type = 'text';
-        originalInput.value = entry.original;
-        originalInput.readOnly = true;
-        originalInput.setAttribute('aria-label', `Original string at offset 0x${entry.offset.toString(16)}`);
-        originalCol.appendChild(originalLabel);
-        originalCol.appendChild(originalInput);
-
-        const modifiedCol = document.createElement('div');
-        modifiedCol.className = 'string-col';
-        const modifiedLabel = document.createElement('label');
-        modifiedLabel.textContent = 'Modified';
-        const modifiedInput = document.createElement('input');
-        modifiedInput.type = 'text';
-        modifiedInput.value = entry.current;
-        modifiedInput.maxLength = entry.original.length;
-        modifiedInput.setAttribute('aria-label', `Modified string at offset 0x${entry.offset.toString(16)}`);
-
-        modifiedInput.addEventListener('input', () => {
-          let filtered = modifiedInput.value.replace(/[^\x20-\x7E]/g, '');
-          if (filtered.length > entry.original.length) {
-            filtered = filtered.slice(0, entry.original.length);
-          }
-          modifiedInput.value = filtered;
-          entry.current = filtered;
-        });
-
-        modifiedCol.appendChild(modifiedLabel);
-        modifiedCol.appendChild(modifiedInput);
-
-        div.appendChild(label);
-        div.appendChild(originalCol);
-        div.appendChild(modifiedCol);
-
-        fragment.appendChild(div);
-      });
-
-      stringList.appendChild(fragment);
-    }
-
-    // Case-sensitive search, debounced for performance
-    const doSearch = debounce(() => {
-      const query = searchInput.value;
-      if (!query) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      buffer = new Uint8Array(reader.result);
+      extractStringsProgressive(buffer, (allStrings) => {
+        entries = allStrings;
         filteredEntries = null;
         renderEntries(entries);
-        return;
+        updateProgress(100);
+        setTimeout(() => {
+          progressContainer.style.display = 'none';
+        }, 300);
+        loadFullFileText(buffer);
+      });
+    };
+    reader.readAsArrayBuffer(file);
+  });
+
+  function updateProgress(percent) {
+    progressBar.style.width = percent + '%';
+    progressBar.textContent = percent + '%';
+    progressContainer.setAttribute('aria-valuenow', percent);
+  }
+
+  // Extract ASCII strings progressively showing batches as found
+  function extractStringsProgressive(buf, callback) {
+    const strings = [];
+    const minLength = 3;
+    const decoder = new TextDecoder('ascii');
+    let i = 0;
+    const batchLimit = 100;
+    const totalLen = buf.length;
+
+    function processBatch() {
+      let batchCount = 0;
+      while (i < totalLen) {
+        if (buf[i] >= 0x20 && buf[i] <= 0x7E) {
+          const start = i;
+          while (i < totalLen && buf[i] >= 0x20 && buf[i] <= 0x7E) i++;
+          // Must end with 0x00 or EOF
+          if (i === totalLen || buf[i] === 0x00) {
+            const str = decoder.decode(buf.slice(start, i));
+            if (str.length >= minLength) {
+              strings.push({ offset: start, original: str, current: str });
+              batchCount++;
+              if (batchCount >= batchLimit) {
+                renderEntries(strings);
+                updateProgress(Math.floor((i / totalLen) * 100));
+                setTimeout(processBatch, 0);
+                return;
+              }
+            }
+            if (i < totalLen && buf[i] === 0x00) i++;
+          }
+        } else {
+          i++;
+        }
       }
-      filteredEntries = entries.filter(e =>
-        e.original.includes(query) || e.current.includes(query)
-      );
-      renderEntries(filteredEntries);
-    }, 200);
+      // Final render call after all done
+      renderEntries(strings);
+      callback(strings);
+    }
+    processBatch();
+  }
 
-    searchInput.addEventListener('input', doSearch);
+  function renderEntries(list) {
+    stringList.innerHTML = '';
+    if (!list || list.length === 0) {
+      stringList.textContent = 'No strings found.';
+      return;
+    }
 
-    downloadBtn.addEventListener('click', () => {
-      if (!buffer || entries.length === 0) return;
+    const fragment = document.createDocumentFragment();
+    const maxShow = 500;
+    const toRender = list.length > maxShow ? list.slice(0, maxShow) : list;
 
-      const updated = new Uint8Array(buffer); 
-      entries.forEach(e => {
-        const enc = new TextEncoder().encode(e.current.padEnd(e.original.length, '\0'));
-        updated.set(enc.slice(0, e.original.length), e.offset);
+    toRender.forEach((entry) => {
+      const div = document.createElement('div');
+      div.className = 'string-item';
+
+      const label = document.createElement('div');
+      label.className = 'string-label';
+      label.textContent = `[0x${entry.offset.toString(16).toUpperCase().padStart(8, '0')}]`;
+
+      const originalCol = document.createElement('div');
+      originalCol.className = 'string-col';
+      const originalLabel = document.createElement('label');
+      originalLabel.textContent = 'Original';
+      const originalInput = document.createElement('input');
+      originalInput.type = 'text';
+      originalInput.value = entry.original;
+      originalInput.readOnly = true;
+      originalInput.setAttribute('aria-label', `Original string at offset 0x${entry.offset.toString(16)}`);
+      originalCol.appendChild(originalLabel);
+      originalCol.appendChild(originalInput);
+
+      const modifiedCol = document.createElement('div');
+      modifiedCol.className = 'string-col';
+      const modifiedLabel = document.createElement('label');
+      modifiedLabel.textContent = 'Modified';
+      const modifiedInput = document.createElement('input');
+      modifiedInput.type = 'text';
+      modifiedInput.value = entry.current;
+      modifiedInput.maxLength = entry.original.length;
+      modifiedInput.setAttribute('aria-label', `Modified string at offset 0x${entry.offset.toString(16)}`);
+
+      modifiedInput.addEventListener('input', () => {
+        let filtered = modifiedInput.value.replace(/[^\x20-\x7E]/g, '');
+        if (filtered.length > entry.original.length) {
+          filtered = filtered.slice(0, entry.original.length);
+        }
+        modifiedInput.value = filtered;
+        entry.current = filtered;
       });
 
-      const blob = new Blob([updated], { type: 'application/octet-stream' });
-      const url = URL.createObjectURL(blob);
+      modifiedCol.appendChild(modifiedLabel);
+      modifiedCol.appendChild(modifiedInput);
 
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'modified-metadata.dat';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      div.appendChild(label);
+      div.appendChild(originalCol);
+      div.appendChild(modifiedCol);
+
+      fragment.appendChild(div);
     });
-  </script>
+
+    stringList.appendChild(fragment);
+  }
+
+  // Case sensitive search, debounced
+  const doSearch = debounce(() => {
+    const query = searchInput.value;
+    if (!query) {
+      filteredEntries = null;
+      renderEntries(entries);
+      return;
+    }
+    filteredEntries = entries.filter(e =>
+      e.original.includes(query) || e.current.includes(query)
+    );
+    renderEntries(filteredEntries);
+  }, 200);
+
+  searchInput.addEventListener('input', doSearch);
+
+  // Progressive loading of full file text in chunks into textarea
+  function loadFullFileText(buf) {
+    fullFileEditorContainer.style.display = 'flex';
+    fullFileEditor.value = '';
+    fileString = '';
+    const chunkSize = 200000;
+    let offset = 0;
+    const decoder = new TextDecoder('ascii');
+
+    function loadChunk() {
+      if (offset >= buf.length) {
+        fileString = fullFileEditor.value;
+        return;
+      }
+      const end = Math.min(offset + chunkSize, buf.length);
+      // Replace non-printable with spaces for display
+      const chunk = buf.slice(offset, end).map(b =>
+        (b >= 0x20 && b <= 0x7E) ? b : 0x20
+      );
+      const decoded = decoder.decode(chunk);
+      fullFileEditor.value += decoded;
+      offset = end;
+      setTimeout(loadChunk, 10);
+    }
+    loadChunk();
+  }
+
+  // When user edits full file editor, keep fileString updated
+  fullFileEditor.addEventListener('input', () => {
+    if (isUpdatingFullFile) return;
+    fileString = fullFileEditor.value;
+  });
+
+  // On download, update original buffer with modified strings and export
+  downloadBtn.addEventListener('click', () => {
+    if (!buffer || !entries.length) return alert('No file loaded or no strings to update.');
+
+    // Create copy to modify
+    const copyBuf = new Uint8Array(buffer);
+
+    for (const entry of entries) {
+      const start = entry.offset;
+      const modStr = entry.current;
+      for (let i = 0; i < modStr.length; i++) {
+        copyBuf[start + i] = modStr.charCodeAt(i);
+      }
+      // Fill the rest with 0x00 if shorter (not allowed, but safe)
+      for (let i = modStr.length; i < entry.original.length; i++) {
+        copyBuf[start + i] = 0x00;
+      }
+    }
+
+    // Build blob and download
+    const blob = new Blob([copyBuf], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (fileInput.files[0]?.name || 'modified') + '.dat';
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+</script>
 </body>
 </html>
