@@ -12,6 +12,8 @@
     --text-dark: #eee;
     --accent: #3b82f6;
     --border: #ccc;
+    --progress-bg: #ddd;
+    --progress-fill: #3b82f6;
   }
   body {
     margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -24,75 +26,88 @@
     color: var(--text-dark);
   }
   header {
-    padding: 1rem;
+    padding: 1rem 1.5rem;
     background: var(--accent);
     color: white;
     font-weight: 700;
-    font-size: 1.4rem;
+    font-size: 1.5rem;
     display: flex;
     justify-content: space-between;
     align-items: center;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.15);
   }
   #darkToggle {
     cursor: pointer;
     background: none;
     border: 2px solid white;
     border-radius: 4px;
-    padding: 0.3rem 0.7rem;
+    padding: 0.3rem 0.8rem;
     font-weight: 600;
+    user-select: none;
+    transition: background-color 0.2s;
+  }
+  #darkToggle:hover {
+    background-color: rgba(255,255,255,0.2);
   }
   main {
     flex: 1;
     display: flex;
     flex-direction: column;
-    padding: 1rem;
+    padding: 1rem 1.5rem;
     gap: 1rem;
   }
   #fileInput {
-    padding: 0.5rem;
+    padding: 0.5rem 0.7rem;
+    font-size: 1rem;
   }
   #progressContainer {
     width: 100%;
-    background-color: #ddd;
-    border-radius: 8px;
+    background-color: var(--progress-bg);
+    border-radius: 10px;
     overflow: hidden;
-    height: 16px;
+    height: 18px;
+    margin-top: 4px;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.1);
     display: none;
   }
   #progressBar {
     height: 100%;
     width: 0%;
-    background-color: var(--accent);
-    transition: width 0.2s ease;
+    background-color: var(--progress-fill);
+    transition: width 0.15s ease;
   }
   #searchInput {
-    padding: 0.5rem;
+    padding: 0.5rem 0.7rem;
     font-size: 1rem;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 8px;
     width: 100%;
+    box-sizing: border-box;
   }
   #stringList {
     flex: 1;
     overflow-y: auto;
     border: 1px solid var(--border);
-    border-radius: 6px;
+    border-radius: 8px;
     background-color: white;
     color: black;
     font-family: monospace;
+    font-size: 0.9rem;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.07);
   }
   body.dark #stringList {
     background-color: #222;
     color: var(--text-dark);
     border-color: #444;
+    box-shadow: none;
   }
   .stringEntry {
-    padding: 0.3rem 0.6rem;
+    padding: 0.4rem 0.8rem;
     border-bottom: 1px solid var(--border);
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-start;
     align-items: center;
-    cursor: pointer;
+    cursor: default;
   }
   body.dark .stringEntry {
     border-color: #444;
@@ -103,33 +118,41 @@
   body.dark .stringEntry:nth-child(even) {
     background-color: #1a1a1a;
   }
-  .stringEntry input {
-    font-family: monospace;
-    font-size: 1rem;
-    border: 1px solid var(--accent);
-    border-radius: 4px;
-    padding: 0.2rem 0.3rem;
-    width: 100%;
-    background-color: transparent;
-    color: inherit;
-  }
   .stringIndex {
     flex-shrink: 0;
-    width: 3rem;
+    width: 4rem;
     text-align: right;
-    margin-right: 0.8rem;
+    margin-right: 1rem;
     user-select: none;
     color: var(--accent);
+    font-weight: 600;
   }
   .stringText {
     flex: 1;
   }
+  .stringText input {
+    font-family: monospace;
+    font-size: 1rem;
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    padding: 0.2rem 0.5rem;
+    width: 100%;
+    background-color: transparent;
+    color: inherit;
+    box-sizing: border-box;
+  }
+  .stringText input:focus {
+    outline: none;
+    border-color: #1e40af;
+    box-shadow: 0 0 5px #1e40afaa;
+  }
   footer {
-    padding: 0.5rem 1rem;
+    padding: 0.6rem 1.5rem;
     background: var(--accent);
     color: white;
     text-align: center;
     font-size: 0.9rem;
+    user-select: none;
   }
   button:disabled {
     opacity: 0.5;
@@ -140,11 +163,15 @@
     background: var(--accent);
     border: none;
     color: white;
-    padding: 0.6rem 1.2rem;
+    padding: 0.7rem 1.3rem;
     font-size: 1rem;
-    border-radius: 6px;
+    border-radius: 8px;
     cursor: pointer;
     align-self: flex-start;
+    transition: background-color 0.2s;
+  }
+  #saveBtn:hover:not(:disabled) {
+    background-color: #1e40af;
   }
 </style>
 </head>
@@ -156,7 +183,7 @@
 <main>
   <input type="file" id="fileInput" accept=".dat" />
   <div id="progressContainer"><div id="progressBar"></div></div>
-  <input type="text" id="searchInput" placeholder="Search strings..." disabled />
+  <input type="text" id="searchInput" placeholder="Search strings (case sensitive)..." disabled />
   <div id="stringList" tabindex="0"></div>
   <button id="saveBtn" disabled>Save Patched File</button>
 </main>
@@ -179,18 +206,15 @@
   let entries = [];
   let filteredEntries = [];
 
-  const PRINTABLE_RE = /[\x20-\x7E]+\x00/g;
+  // Regex: printable ASCII strings (min length 3 for better filtering) ending with null byte
+  // Using minimum length to ignore tiny strings like 'a\x00' or ' \x00'
+  const PRINTABLE_RE = /[\x20-\x7E]{3,}\x00/g;
 
   // Toggle Dark Mode
   darkToggle.addEventListener('click', () => {
     body.classList.toggle('dark');
     darkToggle.textContent = body.classList.contains('dark') ? 'Light Mode' : 'Dark Mode';
   });
-
-  // Utility to decode ASCII strings from Uint8Array slice
-  function decodeAscii(bytes) {
-    return String.fromCharCode(...bytes);
-  }
 
   // Load file and parse strings
   fileInput.addEventListener('change', () => {
@@ -200,6 +224,7 @@
     resetUI();
 
     const reader = new FileReader();
+
     reader.onprogress = (e) => {
       if (e.lengthComputable) {
         const percent = (e.loaded / e.total) * 100;
@@ -207,25 +232,39 @@
         progressContainer.style.display = 'block';
       }
     };
+
     reader.onload = () => {
       progressBar.style.width = '100%';
+
+      // Convert to Uint8Array
       binaryData = new Uint8Array(reader.result);
 
+      // Extract strings (scan byte-by-byte)
       entries = [];
-      // Extract all null-terminated printable ASCII strings
-      let match;
-      while ((match = PRINTABLE_RE.exec(new TextDecoder().decode(binaryData))) !== null) {
-        // match.index gives the start index in decoded string, need byte offset
-        // We will find offset by searching byte sequence in binaryData
-        // Because decoded string length = binaryData length (ASCII)
-        const str = match[0].slice(0, -1); // remove trailing \x00
-        const offset = match.index;
-        entries.push({
-          offset,
-          original: str,
-          current: str,
-          length: str.length
-        });
+      let i = 0;
+      const len = binaryData.length;
+
+      while (i < len) {
+        if (binaryData[i] >= 0x20 && binaryData[i] <= 0x7E) {
+          // Start of string candidate
+          let start = i;
+          while (i < len && binaryData[i] >= 0x20 && binaryData[i] <= 0x7E) i++;
+          if (i < len && binaryData[i] === 0x00) {
+            // Null-terminated string found
+            const strLen = i - start;
+            if (strLen >= 3) { // Only keep strings >= 3 chars
+              const strBytes = binaryData.subarray(start, i);
+              const str = new TextDecoder('ascii').decode(strBytes);
+              entries.push({
+                offset: start,
+                original: str,
+                current: str,
+                length: strLen
+              });
+            }
+          }
+        }
+        i++;
       }
 
       if (entries.length === 0) {
@@ -237,8 +276,11 @@
 
       filteredEntries = [...entries];
       renderStringList();
-      progressContainer.style.display = 'none';
+      setTimeout(() => {
+        progressContainer.style.display = 'none';
+      }, 300);
     };
+
     reader.onerror = () => {
       alert('Failed to read file.');
       progressContainer.style.display = 'none';
@@ -250,100 +292,4 @@
   // Reset UI on new file load
   function resetUI() {
     progressBar.style.width = '0%';
-    progressContainer.style.display = 'none';
-    searchInput.value = '';
-    searchInput.disabled = true;
-    stringList.innerHTML = '';
-    saveBtn.disabled = true;
-    entries = [];
-    filteredEntries = [];
-  }
-
-  // Render filtered strings in list
-  function renderStringList() {
-    stringList.innerHTML = '';
-    if (filteredEntries.length === 0) {
-      stringList.innerHTML = '<p style="padding:1rem;color:#777;">No matching strings.</p>';
-      return;
-    }
-
-    for (let i = 0; i < filteredEntries.length; i++) {
-      const entry = filteredEntries[i];
-      const div = document.createElement('div');
-      div.className = 'stringEntry';
-      div.dataset.index = entry.offset;
-
-      const idxSpan = document.createElement('span');
-      idxSpan.className = 'stringIndex';
-      idxSpan.textContent = entries.indexOf(entry);
-
-      const input = document.createElement('input');
-      input.className = 'stringText';
-      input.type = 'text';
-      input.value = entry.current;
-      input.maxLength = entry.length;
-      input.spellcheck = false;
-      input.title = `Max length: ${entry.length} chars`;
-
-      input.addEventListener('input', () => {
-        // Validate ASCII printable only
-        if (/^[\x20-\x7E]*$/.test(input.value)) {
-          entry.current = input.value;
-          input.style.borderColor = '';
-        } else {
-          input.style.borderColor = 'red';
-        }
-      });
-
-      div.appendChild(idxSpan);
-      div.appendChild(input);
-      stringList.appendChild(div);
-    }
-  }
-
-  // Search filter logic (case-insensitive, substring)
-  searchInput.addEventListener('input', () => {
-    const term = searchInput.value.toLowerCase();
-    filteredEntries = entries.filter(e =>
-      e.original.toLowerCase().includes(term) ||
-      e.current.toLowerCase().includes(term)
-    );
-    renderStringList();
-  });
-
-  // Save patched file
-  saveBtn.addEventListener('click', () => {
-    if (!binaryData || entries.length === 0) return;
-
-    const patched = new Uint8Array(binaryData);
-
-    for (const entry of entries) {
-      if (entry.current !== entry.original) {
-        const bytes = new TextEncoder().encode(entry.current);
-        const padded = new Uint8Array(entry.length);
-        padded.fill(0);
-        padded.set(bytes);
-        patched.set(padded, entry.offset);
-      }
-    }
-
-    // Create blob and trigger download
-    const blob = new Blob([patched], { type: 'application/octet-stream' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'patched_metadata.dat';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => {
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    }, 0);
-  });
-
-  // Initialize dark mode text
-  darkToggle.textContent = 'Dark Mode';
-})();
-</script>
-</body>
-</html>
+    progressContainer.style.display
