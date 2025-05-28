@@ -95,35 +95,55 @@
     let chars = [];
     for (let i = 0; i < length; i++) {
       const byte = dataView.getUint8(offset + i);
-      // Filter printable ASCII + common extended chars, else show space
+      // Show all printable ASCII + basic extended (space to ~)
       chars.push(byte >= 32 && byte <= 126 ? String.fromCharCode(byte) : ' ');
     }
     return chars.join('');
   }
 
-  // Try multiple known offsets for stringLiteralCount & stringLiteralOffset
+  // Validate if string looks legit (only printable + length reasonable)
+  function isValidString(str) {
+    if (!str || str.length === 0 || str.length > 1000) return false;
+    // At least 50% printable chars
+    const printableCount = [...str].filter(c => c >= ' ' && c <= '~').length;
+    return printableCount / str.length > 0.5;
+  }
+
+  // Scan first 256 bytes to detect string literal table offsets dynamically
   function detectStringLiteralTableOffsets() {
-    const candidates = [
-      {count: 0x50, offset: 0x54},
-      {count: 0x58, offset: 0x5C},
-      {count: 0x40, offset: 0x44}
-    ];
-    for (const c of candidates) {
-      if (arrayBuffer.byteLength > c.offset + 4) {
-        const count = dataView.getUint32(c.count, true);
-        const offset = dataView.getUint32(c.offset, true);
-        // Validate plausibility
-        if (
-          count > 0 &&
-          offset > 0 &&
-          offset + count * 8 <= arrayBuffer.byteLength &&
-          count < 10_000_000 // sanity upper limit
-        ) {
-          return {count, offset};
-        }
+    const headerSize = Math.min(256, dataView.byteLength);
+    const fileSize = dataView.byteLength;
+    let bestCandidate = null;
+    let bestValidStrings = 0;
+
+    for (let i = 0; i < headerSize - 8; i += 4) {
+      let count = dataView.getUint32(i, true);
+      let offset = dataView.getUint32(i + 4, true);
+
+      // Sanity checks
+      if (count === 0 || offset === 0) continue;
+      if (offset >= fileSize) continue;
+      if (offset + count * 8 > fileSize) continue; // each entry 8 bytes: offset(4) + length(4)
+
+      // Try reading first 5 strings and count valid ones
+      let validStrings = 0;
+      for (let j = 0; j < Math.min(count, 5); j++) {
+        let entryOffset = offset + j * 8;
+        if (entryOffset + 8 > fileSize) break;
+        let strOffset = dataView.getUint32(entryOffset, true);
+        let strLen = dataView.getInt32(entryOffset + 4, true);
+        if (strOffset === 0 || strLen <= 0 || strOffset + strLen > fileSize) continue;
+        let s = readString(strOffset, strLen);
+        if (isValidString(s)) validStrings++;
+      }
+
+      if (validStrings > bestValidStrings) {
+        bestValidStrings = validStrings;
+        bestCandidate = { count, offset };
+        if (bestValidStrings === 5) break; // perfect match found
       }
     }
-    return null;
+    return bestCandidate;
   }
 
   // Extract string literals incrementally in batches (to avoid freeze)
@@ -202,58 +222,60 @@
 
   // Save modified strings back to file buffer, overwrite if fits or append if longer
   function saveModifiedFile() {
-    let newBuffer = new Uint8Array(arrayBuffer);
-    let appendOffset = arrayBuffer.byteLength; // where to append new strings if needed
-    let appendedData = [];
+    let newBuffer = new Uint8Array(arrayBuffer.byteLength + 1024 * 1024); // extra 1MB in case
+    newBuffer.set(new Uint8Array(arrayBuffer));
 
-    for (const s of stringLiterals) {
-      if (s.modified === s.original) continue;
+    // Find max offset to append strings if needed
+    let appendOffset = arrayBuffer.byteLength;
 
-      let modBytes = new TextEncoder().encode(s.modified);
-      // If modified string fits original length, overwrite in place
-      if (modBytes.length <= s.length) {
-        for (let i = 0; i < modBytes.length; i++) {
-          newBuffer[s.offset + i] = modBytes[i];
+    // We'll rewrite string literal table entries here
+    const dv = new DataView(newBuffer.buffer);
+
+    for (let i = 0; i < stringLiteralCount; i++) {
+      let entryBase = stringLiteralOffset + i * 8;
+      let strOff = dv.getUint32(entryBase, true);
+      let strLen = dv.getInt32(entryBase + 4, true);
+      let s = stringLiterals[i];
+
+      if (s.modified === s.original) continue; // no change
+
+      const encoder = new TextEncoder();
+      const encoded = encoder.encode(s.modified);
+
+      if (encoded.length <= s.length) {
+        // Overwrite in place, pad zeros if shorter
+        for (let b = 0; b < encoded.length; b++) {
+          newBuffer[strOff + b] = encoded[b];
         }
-        // If modified shorter, pad remainder with zero bytes
-        for (let i = modBytes.length; i < s.length; i++) {
-          newBuffer[s.offset + i] = 0;
+        for (let b = encoded.length; b < s.length; b++) {
+          newBuffer[strOff + b] = 0;
         }
+        // Length unchanged, no table update needed
       } else {
-        // Append modified string at EOF, update string literal offset table entry to new location
-        let newStrOffset = appendOffset;
-        appendOffset += modBytes.length;
-
-        // Append new string bytes (defer until final)
-        appendedData.push({ offset: newStrOffset, bytes: modBytes });
-
-        // Update string literal offset in header table
-        // find index of s in stringLiterals array:
-        let index = stringLiterals.indexOf(s);
-        let entryOffset = stringLiteralOffset + index * 8;
-        dataView.setUint32(entryOffset, newStrOffset, true);
-        // Update string length to new length
-        dataView.setInt32(entryOffset + 4, modBytes.length, true);
+        // Append at end
+        for (let b = 0; b < encoded.length; b++) {
+          newBuffer[appendOffset + b] = encoded[b];
+        }
+        // Zero pad? No need if we store length exactly
+        // Update pointer & length in string literal table
+        dv.setUint32(entryBase, appendOffset, true);
+        dv.setInt32(entryBase + 4, encoded.length, true);
+        appendOffset += encoded.length;
       }
     }
 
-    // Create new ArrayBuffer with appended data if any
-    if (appendedData.length > 0) {
-      let finalBuffer = new Uint8Array(appendOffset);
-      finalBuffer.set(newBuffer, 0);
-      for (const ad of appendedData) {
-        finalBuffer.set(ad.bytes, ad.offset);
-      }
-      newBuffer = finalBuffer;
-    }
+    // Slice to new length
+    newBuffer = newBuffer.slice(0, appendOffset);
 
-    // Download the modified file
     const blob = new Blob([newBuffer], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
+
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'global-metadata.modified.dat';
+    a.download = 'global-metadata-modified.dat';
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }
 
@@ -269,24 +291,20 @@
     arrayBuffer = await file.arrayBuffer();
     dataView = new DataView(arrayBuffer);
 
-    // Detect string literal count and offset in header
+    // Detect string literal table offsets automatically
     const detected = detectStringLiteralTableOffsets();
     if (!detected) {
-      alert('Invalid or corrupt string literal table header info.');
+      alert('Failed to detect Il2CppStringLiteral table offset and count in this file.');
       return;
     }
     stringLiteralCount = detected.count;
     stringLiteralOffset = detected.offset;
 
-    // Start extracting strings incrementally (batch=100)
-    await extractStrings(100);
-    updateTable();
+    // Extract strings incrementally to avoid freeze
+    await extractStrings(200);
   });
 
-  searchInput.addEventListener('input', () => {
-    updateTable();
-  });
-
+  searchInput.addEventListener('input', updateTable);
   saveBtn.addEventListener('click', saveModifiedFile);
 })();
 </script>
