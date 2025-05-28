@@ -1,126 +1,183 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Simple String-based Binary Editor</title>
-<style>
-  body { font-family: monospace; margin: 1em; }
-  #strings { max-height: 70vh; overflow-y: auto; border: 1px solid #ccc; padding: 0.5em; }
-  .string-item { margin-bottom: 1em; }
-  .label { font-weight: bold; margin-bottom: 0.2em; }
-  textarea { width: 100%; height: 3em; font-family: monospace; }
-  #search { width: 100%; padding: 0.5em; margin-bottom: 1em; font-size: 1em; }
-  button { margin-top: 1em; padding: 0.5em 1em; font-size: 1em; }
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>High-Performance .DAT String Editor</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background: #111;
+      color: #eee;
+      margin: 0;
+      padding: 1rem;
+    }
+    h1 {
+      text-align: center;
+    }
+    #controls {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 1rem;
+      margin-bottom: 1rem;
+    }
+    input, button {
+      padding: 0.5rem;
+      background: #222;
+      border: 1px solid #444;
+      color: #eee;
+      border-radius: 5px;
+    }
+    #progress {
+      width: 100%;
+      height: 20px;
+      background: #333;
+      border-radius: 10px;
+      overflow: hidden;
+      margin-bottom: 1rem;
+    }
+    #progress-bar {
+      height: 100%;
+      width: 0;
+      background: #4caf50;
+      transition: width 0.1s;
+    }
+    #list {
+      max-height: 70vh;
+      overflow-y: auto;
+      border: 1px solid #333;
+      padding: 0.5rem;
+    }
+    .entry {
+      background: #1a1a1a;
+      border-radius: 5px;
+      padding: 0.5rem;
+      margin-bottom: 0.5rem;
+    }
+    .entry input {
+      width: 100%;
+      font-family: monospace;
+      background: #000;
+      border: 1px solid #333;
+      color: #ccc;
+    }
+  </style>
 </head>
 <body>
+  <h1>.DAT String Editor (No Freeze)</h1>
+  <div id="controls">
+    <input type="file" id="fileInput" accept=".dat">
+    <input type="text" id="search" placeholder="Case-sensitive search...">
+    <button id="download">Download</button>
+  </div>
+  <div id="progress"><div id="progress-bar"></div></div>
+  <div id="list"></div>
 
-<h1>Simple String-based Binary Editor</h1>
-<input id="fileInput" type="file" />
-<input id="search" placeholder="Search strings..." />
-<div id="strings"></div>
-<button id="saveBtn" disabled>Save Modified File</button>
+  <script>
+    const fileInput = document.getElementById('fileInput');
+    const list = document.getElementById('list');
+    const progressBar = document.getElementById('progress-bar');
+    const search = document.getElementById('search');
+    const download = document.getElementById('download');
 
-<script>
-(() => {
-  let buffer = null;
-  let entries = [];
+    let entries = [];
+    let originalBuffer = null;
 
-  const fileInput = document.getElementById('fileInput');
-  const stringsDiv = document.getElementById('strings');
-  const searchInput = document.getElementById('search');
-  const saveBtn = document.getElementById('saveBtn');
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      list.innerHTML = '';
+      entries = [];
+      readFileInChunks(file);
+    });
 
-  // Extract all ASCII strings >= 3 chars (printable chars only)
-  function extractStrings(buf) {
-    entries = [];
-    let current = [];
-    let start = null;
-    for (let i = 0; i < buf.length; i++) {
-      const c = buf[i];
-      if (c >= 32 && c <= 126) {
-        if (start === null) start = i;
-        current.push(String.fromCharCode(c));
-      } else {
-        if (current.length >= 3) {
-          entries.push({ offset: start, length: current.length, text: current.join('') });
-        }
-        start = null;
-        current = [];
-      }
-    }
-    // Handle last string
-    if (current.length >= 3) {
-      entries.push({ offset: start, length: current.length, text: current.join('') });
-    }
-  }
-
-  // Render strings to DOM, filtering by search text
-  function renderStrings(filter = '') {
-    stringsDiv.innerHTML = '';
-    const filtered = entries.filter(e => e.text.toLowerCase().includes(filter.toLowerCase()));
-    for (const entry of filtered) {
-      const div = document.createElement('div');
-      div.className = 'string-item';
-
-      const label = document.createElement('div');
-      label.className = 'label';
-      label.textContent = `Offset 0x${entry.offset.toString(16)} - Length ${entry.length}`;
-
-      const textarea = document.createElement('textarea');
-      textarea.value = entry.text;
-      textarea.addEventListener('input', () => {
-        const newText = textarea.value;
-        if (newText.length > entry.length) {
-          alert(`Text too long! Max length: ${entry.length}`);
-          textarea.value = entry.text; // revert
-          return;
-        }
-        // Update buffer bytes at entry.offset
-        for (let i = 0; i < entry.length; i++) {
-          const code = i < newText.length ? newText.charCodeAt(i) : 0x20; // pad with spaces if shorter
-          buffer[entry.offset + i] = code;
-        }
-        entry.text = textarea.value;
+    search.addEventListener('input', () => {
+      const term = search.value;
+      document.querySelectorAll('.entry').forEach(e => {
+        const original = e.dataset.original;
+        const modified = e.querySelector('input').value;
+        e.style.display = (original.includes(term) || modified.includes(term)) ? '' : 'none';
       });
+    });
 
-      div.appendChild(label);
-      div.appendChild(textarea);
-      stringsDiv.appendChild(div);
+    download.addEventListener('click', () => {
+      const modifiedBuffer = new Uint8Array(originalBuffer);
+      entries.forEach(e => {
+        const encoded = new TextEncoder().encode(e.modified.padEnd(e.original.length, '\0'));
+        modifiedBuffer.set(encoded.slice(0, e.original.length), e.offset);
+      });
+      const blob = new Blob([modifiedBuffer], { type: 'application/octet-stream' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'modified.dat';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+
+    function readFileInChunks(file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        originalBuffer = new Uint8Array(reader.result);
+        extractStringsIncrementally(originalBuffer);
+      };
+      reader.readAsArrayBuffer(file);
     }
-  }
 
-  fileInput.addEventListener('change', async () => {
-    const file = fileInput.files[0];
-    if (!file) return;
+    function extractStringsIncrementally(buffer) {
+      const decoder = new TextDecoder('ascii');
+      const minLen = 3;
+      let i = 0;
+      const CHUNK_SIZE = 100000;
 
-    const arrayBuffer = await file.arrayBuffer();
-    buffer = new Uint8Array(arrayBuffer);
+      function step() {
+        const end = Math.min(i + CHUNK_SIZE, buffer.length);
+        while (i < end) {
+          if (buffer[i] >= 32 && buffer[i] <= 126) {
+            const start = i;
+            while (i < buffer.length && buffer[i] >= 32 && buffer[i] <= 126) i++;
+            if (i === buffer.length || buffer[i] === 0x00) {
+              const str = decoder.decode(buffer.slice(start, i));
+              if (str.length >= minLen) {
+                const offset = start;
+                entries.push({ offset, original: str, modified: str });
+                addEntry(offset, str);
+              }
+              if (buffer[i] === 0x00) i++;
+            }
+          } else {
+            i++;
+          }
+        }
+        const percent = Math.floor((i / buffer.length) * 100);
+        progressBar.style.width = percent + '%';
+        if (i < buffer.length) {
+          setTimeout(step, 0);
+        } else {
+          progressBar.style.width = '100%';
+        }
+      }
+      step();
+    }
 
-    extractStrings(buffer);
-    renderStrings();
-    saveBtn.disabled = false;
-  });
-
-  searchInput.addEventListener('input', () => {
-    renderStrings(searchInput.value);
-  });
-
-  saveBtn.addEventListener('click', () => {
-    if (!buffer) return;
-    const blob = new Blob([buffer], {type: 'application/octet-stream'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'modified_file.dat';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-  });
-})();
-</script>
-
+    function addEntry(offset, str) {
+      const div = document.createElement('div');
+      div.className = 'entry';
+      div.dataset.original = str;
+      div.innerHTML = `
+        <div><b>0x${offset.toString(16).toUpperCase()}</b></div>
+        <div>Original: <code>${str}</code></div>
+        <div>Modified: <input type="text" value="${str}" /></div>
+      `;
+      const input = div.querySelector('input');
+      input.maxLength = str.length;
+      input.addEventListener('input', () => {
+        const entry = entries.find(e => e.offset === offset);
+        entry.modified = input.value.replace(/[^\x20-\x7E]/g, '').slice(0, entry.original.length);
+        input.value = entry.modified;
+      });
+      list.appendChild(div);
+    }
+  </script>
 </body>
 </html>
