@@ -3,112 +3,105 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Metadata String Editor</title>
+  <title>Metadata String Editor (Fast Web)</title>
   <style>
-    body {
-      background-color: #121212;
-      color: #e0e0e0;
-      font-family: sans-serif;
-      padding: 2em;
-    }
-    h1 {
-      text-align: center;
-    }
-    #progress-container {
-      display: none;
-      margin-top: 1em;
-    }
-    #progress {
-      width: 100%;
-      background-color: #333;
-    }
-    #progress-bar {
-      width: 0%;
-      height: 24px;
-      background-color: #4caf50;
-      text-align: center;
-      color: white;
-    }
-    #string-list {
-      margin-top: 2em;
-      max-height: 400px;
-      overflow-y: auto;
-    }
-    .string-item {
-      padding: 8px;
-      background-color: #1e1e1e;
-      margin-bottom: 5px;
-      border-radius: 4px;
-    }
-    input[type="file"] {
-      margin-bottom: 1em;
-    }
-    input[type="text"] {
-      width: 100%;
-    }
+    body{margin:0;font-family:system-ui;background:#121212;color:#e0e0e0;padding:1.5rem}
+    h1{text-align:center;margin-top:0}
+    #progress-container{display:none;margin-top:1rem;background:#333;border-radius:8px;overflow:hidden}
+    #progress-bar{height:20px;width:0%;background:#4caf50;text-align:center;color:#fff;font-weight:600;font-size:.8rem}
+    #string-list{margin-top:1.5rem;max-height:70vh;overflow:auto;border:1px solid #444;border-radius:6px;padding:.5rem}
+    .string-item{margin-bottom:.5rem;background:#1e1e1e;padding:.5rem;border-radius:4px;display:flex;flex-direction:column;gap:.3rem}
+    .string-item label{font-size:.85rem;color:#90caf9}
+    input[type="file"]{margin-top:.5rem}
+    input.edit{font-family:monospace;color:#eee;background:#000;border:1px solid #555;border-radius:4px;padding:.3rem}
   </style>
 </head>
 <body>
   <h1>Metadata String Editor (Web)</h1>
-  <input type="file" id="file-input" accept=".dat">
-  <div id="progress-container">
-    <div id="progress">
-      <div id="progress-bar">0%</div>
-    </div>
-  </div>
+  <input type="file" id="file-input" accept=".dat"/>
+  <div id="progress-container"><div id="progress-bar">0%</div></div>
   <div id="string-list"></div>
-  <script>
-    const fileInput = document.getElementById('file-input');
-    const stringList = document.getElementById('string-list');
-    const progressContainer = document.getElementById('progress-container');
-    const progressBar = document.getElementById('progress-bar');
 
-    fileInput.addEventListener('change', async () => {
-      const file = fileInput.files[0];
-      if (!file) return;
+<script>
+const fileInput=document.getElementById('file-input');
+const stringList=document.getElementById('string-list');
+const progressContainer=document.getElementById('progress-container');
+const progressBar=document.getElementById('progress-bar');
 
-      const arrayBuffer = await file.arrayBuffer();
-      const bytes = new Uint8Array(arrayBuffer);
-      const entries = [];
-      const regex = /[\x20-\x7E]+\x00/g;
-      const decoder = new TextDecoder('ascii');
-      let offset = 0;
+fileInput.addEventListener('change',()=>{
+  const file=fileInput.files[0];
+  if(!file)return;
+  stringList.innerHTML='';
+  progressBar.style.width='0%';progressBar.textContent='0%';
+  progressContainer.style.display='block';
 
-      progressContainer.style.display = 'block';
-      for (let i = 0; i < bytes.length; i++) {
-        if (bytes[i] >= 0x20 && bytes[i] <= 0x7E) {
-          let start = i;
-          while (i < bytes.length && bytes[i] >= 0x20 && bytes[i] <= 0x7E) i++;
-          if (bytes[i] === 0x00) {
-            const strBytes = bytes.slice(start, i);
-            const text = decoder.decode(strBytes);
-            entries.push({ offset: start, original: text, current: text });
+  file.arrayBuffer().then(buf=>{
+    const bytes=new Uint8Array(buf);
+    const entries=[];
+    const decoder=new TextDecoder('ascii');
+
+    const chunkSize=65536; // 64 KB
+    let offset=0;
+    function processChunk(){
+      const end=Math.min(offset+chunkSize,bytes.length);
+      let i=offset;
+      while(i<end){
+        if(bytes[i]>=0x20&&bytes[i]<=0x7E){
+          const start=i;
+          while(i<bytes.length&&bytes[i]>=0x20&&bytes[i]<=0x7E) i++;
+          if(i<bytes.length&&bytes[i]===0x00){
+            const str=decoder.decode(bytes.subarray(start,i));
+            if(str.length>=3){
+              entries.push({offset:start,original:str,current:str});
+            }
           }
         }
-        if (i % 5000 === 0) {
-          const percent = Math.floor(i / bytes.length * 100);
-          progressBar.style.width = percent + '%';
-          progressBar.textContent = percent + '%';
+        i++;
+      }
+      offset=end;
+      const percent=Math.floor(offset/bytes.length*100);
+      progressBar.style.width=percent+'%';
+      progressBar.textContent=percent+'%';
+      if(offset<bytes.length){
+        setTimeout(processChunk,0); // yield to UI
+      }else{
+        progressBar.style.width='100%';progressBar.textContent='Done';
+        progressContainer.style.display='none';
+        renderEntries(entries);
+        if(entries.length===0){
+          stringList.innerHTML='<p>No strings found.</p>';
         }
       }
-      progressBar.style.width = '100%';
-      progressBar.textContent = 'Done';
+    }
+    processChunk();
+  });
+});
 
-      entries.forEach((entry, index) => {
-        const container = document.createElement('div');
-        container.className = 'string-item';
-        const label = document.createElement('label');
-        label.textContent = `[${index}] ${entry.original}`;
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.value = entry.current;
-        input.oninput = () => entry.current = input.value;
-        container.appendChild(label);
-        container.appendChild(document.createElement('br'));
-        container.appendChild(input);
-        stringList.appendChild(container);
-      });
+function renderEntries(entries){
+  const frag=document.createDocumentFragment();
+  entries.forEach((e,idx)=>{
+    const div=document.createElement('div');
+    div.className='string-item';
+    const label=document.createElement('label');
+    label.textContent=`[${idx}] (0x${e.offset.toString(16)})`;
+    const input=document.createElement('input');
+    input.className='edit';
+    input.type='text';
+    input.value=e.current;
+    input.maxLength=e.original.length;
+    input.addEventListener('input',()=>{
+      if(input.value.length<=e.original.length){
+        e.current=input.value;
+      }else{
+        input.value=e.current;
+      }
     });
-  </script>
+    div.appendChild(label);
+    div.appendChild(input);
+    frag.appendChild(div);
+  });
+  stringList.appendChild(frag);
+}
+</script>
 </body>
 </html>
