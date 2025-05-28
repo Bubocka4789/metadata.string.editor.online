@@ -3,646 +3,122 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>MetaData String Editor + Hex Editor</title>
+<title>Simple String-based Binary Editor</title>
 <style>
-  body {
-    margin: 0; background: #121212; color: #e0e0e0; font-family: system-ui, monospace;
-    display: flex; flex-direction: column; min-height: 100vh; padding: 1rem;
-  }
-  h1 {
-    text-align: center; margin-bottom: 1rem;
-  }
-  #controls {
-    display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center; margin-bottom: 1rem;
-  }
-  input[type="file"], input[type="text"], button {
-    background: #000; color: #eee; border: 1px solid #555; border-radius: 4px;
-    padding: 0.4rem 0.6rem; font-size: 1rem; outline-offset: 2px; transition: border-color 0.2s ease;
-  }
-  input[type="file"]:focus, input[type="text"]:focus, button:focus {
-    border-color: #4caf50;
-  }
-  #progress-container {
-    display: none; width: 100%; max-width: 600px; margin: 0 auto 1rem auto;
-    background: #333; border-radius: 8px; overflow: hidden; height: 20px;
-  }
-  #progress-bar {
-    height: 100%; width: 0%; background: #4caf50; text-align: center;
-    color: #fff; font-weight: bold; line-height: 20px; user-select: none;
-    transition: width 0.2s ease; font-size: 0.9rem;
-  }
-  #editors {
-    display: flex; flex-wrap: wrap; gap: 1rem; flex-grow: 1; overflow: hidden;
-  }
-  #string-list, #hex-editor {
-    background: #1e1e1e; border: 1px solid #444; border-radius: 6px; padding: 0.5rem;
-    overflow-y: auto; user-select: text;
-    flex: 1 1 400px;
-    max-height: 60vh;
-  }
-  #string-list {
-    min-width: 350px;
-  }
-  .string-item {
-    background: #2a2a2a; padding: 0.5rem; border-radius: 4px; margin-bottom: 0.5rem;
-    display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;
-  }
-  .string-label {
-    flex-basis: 100%; color: #90caf9; font-size: 0.85rem; margin-bottom: 0.25rem;
-    user-select: text;
-  }
-  .string-col {
-    flex: 1 1 45%; display: flex; flex-direction: column; min-width: 200px;
-  }
-  .string-col label {
-    font-size: 0.75rem; margin-bottom: 0.15rem; color: #bbb; user-select: none;
-  }
-  .string-col input {
-    width: 100%; font-family: monospace; font-size: 1rem; background: #000;
-    border: 1px solid #555; border-radius: 4px; color: #eee; padding: 0.3rem 0.5rem;
-    transition: border-color 0.2s ease;
-  }
-  .string-col input:focus {
-    border-color: #4caf50; outline: none;
-  }
-  .string-col input[readonly] {
-    background: #222; color: #777; cursor: default;
-  }
-
-  /* HEX editor styling */
-  #hex-editor {
-    font-family: monospace;
-    white-space: pre;
-    overflow-x: auto;
-    user-select: none;
-    position: relative;
-  }
-  #hex-editor table {
-    border-collapse: collapse;
-    width: 100%;
-  }
-  #hex-editor thead tr {
-    background: #333;
-    position: sticky;
-    top: 0;
-    z-index: 2;
-  }
-  #hex-editor th, #hex-editor td {
-    border: 1px solid #444;
-    padding: 2px 5px;
-    text-align: center;
-    min-width: 20px;
-    user-select: text;
-  }
-  #hex-editor td input {
-    background: transparent;
-    border: none;
-    width: 20px;
-    color: #eee;
-    text-align: center;
-    font-family: monospace;
-    font-size: 1rem;
-    padding: 0;
-    margin: 0;
-  }
-  #hex-editor td input:focus {
-    outline: 2px solid #4caf50;
-    background: #222;
-  }
-  #hex-editor td.ascii {
-    min-width: 14px;
-    cursor: text;
-  }
-
-  @media (max-width: 900px) {
-    #editors {
-      flex-direction: column;
-    }
-    #string-list, #hex-editor {
-      max-height: 40vh;
-    }
-  }
+  body { font-family: monospace; margin: 1em; }
+  #strings { max-height: 70vh; overflow-y: auto; border: 1px solid #ccc; padding: 0.5em; }
+  .string-item { margin-bottom: 1em; }
+  .label { font-weight: bold; margin-bottom: 0.2em; }
+  textarea { width: 100%; height: 3em; font-family: monospace; }
+  #search { width: 100%; padding: 0.5em; margin-bottom: 1em; font-size: 1em; }
+  button { margin-top: 1em; padding: 0.5em 1em; font-size: 1em; }
 </style>
 </head>
 <body>
 
-<h1>MetaData String Editor + Hex Editor</h1>
-
-<div id="controls">
-  <input type="file" id="file-input" accept=".dat" aria-label="Load .dat file" />
-  <input type="text" id="search" placeholder="Search (case-sensitive)" aria-label="Search strings" />
-  <button id="download-btn" aria-label="Download modified file" disabled>Download</button>
-</div>
-
-<div id="progress-container" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-  <div id="progress-bar">0%</div>
-</div>
-
-<div id="editors">
-  <div id="string-list" aria-live="polite" aria-relevant="additions" tabindex="0" aria-label="Strings list"></div>
-  <div id="hex-editor" tabindex="0" aria-label="Hexadecimal editor"></div>
-</div>
+<h1>Simple String-based Binary Editor</h1>
+<input id="fileInput" type="file" />
+<input id="search" placeholder="Search strings..." />
+<div id="strings"></div>
+<button id="saveBtn" disabled>Save Modified File</button>
 
 <script>
 (() => {
-  const fileInput = document.getElementById('file-input');
-  const progressBar = document.getElementById('progress-bar');
-  const progressContainer = document.getElementById('progress-container');
-  const stringList = document.getElementById('string-list');
+  let buffer = null;
+  let entries = [];
+
+  const fileInput = document.getElementById('fileInput');
+  const stringsDiv = document.getElementById('strings');
   const searchInput = document.getElementById('search');
-  const downloadBtn = document.getElementById('download-btn');
-  const hexEditor = document.getElementById('hex-editor');
+  const saveBtn = document.getElementById('saveBtn');
 
-  let buffer = null;         // Uint8Array of file data
-  let entries = [];          // Extracted strings [{offset, original, current}]
-  let filteredEntries = [];
-
-  const MIN_LENGTH = 3;
-  const CHUNK_SIZE = 100000;
-
-  function updateProgress(percent) {
-    progressBar.style.width = percent + '%';
-    progressBar.textContent = percent + '%';
-    progressContainer.setAttribute('aria-valuenow', percent);
+  // Extract all ASCII strings >= 3 chars (printable chars only)
+  function extractStrings(buf) {
+    entries = [];
+    let current = [];
+    let start = null;
+    for (let i = 0; i < buf.length; i++) {
+      const c = buf[i];
+      if (c >= 32 && c <= 126) {
+        if (start === null) start = i;
+        current.push(String.fromCharCode(c));
+      } else {
+        if (current.length >= 3) {
+          entries.push({ offset: start, length: current.length, text: current.join('') });
+        }
+        start = null;
+        current = [];
+      }
+    }
+    // Handle last string
+    if (current.length >= 3) {
+      entries.push({ offset: start, length: current.length, text: current.join('') });
+    }
   }
 
-  // Clear string list and add entries
-  function renderEntries(list) {
-    stringList.innerHTML = '';
-    if (list.length === 0) {
-      stringList.textContent = 'No strings found.';
-      return;
-    }
-    const fragment = document.createDocumentFragment();
-    list.forEach(entry => {
+  // Render strings to DOM, filtering by search text
+  function renderStrings(filter = '') {
+    stringsDiv.innerHTML = '';
+    const filtered = entries.filter(e => e.text.toLowerCase().includes(filter.toLowerCase()));
+    for (const entry of filtered) {
       const div = document.createElement('div');
       div.className = 'string-item';
 
       const label = document.createElement('div');
-      label.className = 'string-label';
-      label.textContent = `[0x${entry.offset.toString(16).toUpperCase().padStart(8, '0')}]`;
+      label.className = 'label';
+      label.textContent = `Offset 0x${entry.offset.toString(16)} - Length ${entry.length}`;
 
-      const originalCol = document.createElement('div');
-      originalCol.className = 'string-col';
-      const originalLabel = document.createElement('label');
-      originalLabel.textContent = 'Original';
-      const originalInput = document.createElement('input');
-      originalInput.type = 'text';
-      originalInput.value = entry.original;
-      originalInput.readOnly = true;
-      originalInput.setAttribute('aria-label', `Original string at offset 0x${entry.offset.toString(16)}`);
-      originalCol.appendChild(originalLabel);
-      originalCol.appendChild(originalInput);
-
-      const modifiedCol = document.createElement('div');
-      modifiedCol.className = 'string-col';
-      const modifiedLabel = document.createElement('label');
-      modifiedLabel.textContent = 'Modified';
-      const modifiedInput = document.createElement('input');
-      modifiedInput.type = 'text';
-      modifiedInput.value = entry.current;
-      modifiedInput.maxLength = entry.original.length;
-      modifiedInput.setAttribute('aria-label', `Modified string at offset 0x${entry.offset.toString(16)}`);
-
-      modifiedInput.addEventListener('input', () => {
-        let filtered = modifiedInput.value.replace(/[^\x20-\x7E]/g, '');
-        if (filtered.length > entry.original.length) filtered = filtered.slice(0, entry.original.length);
-        modifiedInput.value = filtered;
-        entry.current = filtered;
-        updateBufferFromStrings(entry);
-        renderHexEditorPartial(entry.offset, entry.original.length);
+      const textarea = document.createElement('textarea');
+      textarea.value = entry.text;
+      textarea.addEventListener('input', () => {
+        const newText = textarea.value;
+        if (newText.length > entry.length) {
+          alert(`Text too long! Max length: ${entry.length}`);
+          textarea.value = entry.text; // revert
+          return;
+        }
+        // Update buffer bytes at entry.offset
+        for (let i = 0; i < entry.length; i++) {
+          const code = i < newText.length ? newText.charCodeAt(i) : 0x20; // pad with spaces if shorter
+          buffer[entry.offset + i] = code;
+        }
+        entry.text = textarea.value;
       });
 
-      modifiedCol.appendChild(modifiedLabel);
-      modifiedCol.appendChild(modifiedInput);
-
       div.appendChild(label);
-      div.appendChild(originalCol);
-      div.appendChild(modifiedCol);
-
-      fragment.appendChild(div);
-    });
-    stringList.appendChild(fragment);
-  }
-
-  // Update buffer bytes based on modified string entry
-  function updateBufferFromStrings(entry) {
-    for (let i = 0; i < entry.current.length; i++) {
-      buffer[entry.offset + i] = entry.current.charCodeAt(i);
-    }
-    // Null-pad if shorter than original
-    for (let i = entry.current.length; i < entry.original.length; i++) {
-      buffer[entry.offset + i] = 0;
+      div.appendChild(textarea);
+      stringsDiv.appendChild(div);
     }
   }
 
-  // Extract strings progressively and append live
-  async function extractStringsProgressive(buf) {
-    entries = [];
-    stringList.innerHTML = '';
-    const decoder = new TextDecoder('ascii');
-    let i = 0;
-    const length = buf.length;
-
-    while (i < length) {
-      if (buf[i] >= 0x20 && buf[i] <= 0x7E) {
-        const start = i;
-        while (i < length && buf[i] >= 0x20 && buf[i] <= 0x7E) i++;
-
-        if ((i === length || buf[i] === 0x00) && (i - start) >= MIN_LENGTH) {
-          const str = decoder.decode(buf.slice(start, i));
-          const entry = { offset: start, original: str, current: str };
-          entries.push(entry);
-
-          if (!searchInput.value || str.includes(searchInput.value)) {
-            appendEntry(entry);
-          }
-        }
-        if (i < length && buf[i] === 0x00) i++;
-      } else {
-        i++;
-      }
-      if (i % CHUNK_SIZE === 0 || i >= length) {
-        updateProgress(Math.floor((i / length) * 100));
-        await new Promise(r => setTimeout(r, 0));
-      }
-    }
-    updateProgress(100);
-  }
-
-  // Append a single entry (used during progressive extraction)
-  function appendEntry(entry) {
-    const div = document.createElement('div');
-    div.className = 'string-item';
-
-    const label = document.createElement('div');
-    label.className = 'string-label';
-    label.textContent = `[0x${entry.offset.toString(16).toUpperCase().padStart(8, '0')}]`;
-
-    const originalCol = document.createElement('div');
-    originalCol.className = 'string-col';
-    const originalLabel = document.createElement('label');
-    originalLabel.textContent = 'Original';
-    const originalInput = document.createElement('input');
-    originalInput.type = 'text';
-    originalInput.value = entry.original;
-    originalInput.readOnly = true;
-    originalInput.setAttribute('aria-label', `Original string at offset 0x${entry.offset.toString(16)}`);
-    originalCol.appendChild(originalLabel);
-    originalCol.appendChild(originalInput);
-
-    const modifiedCol = document.createElement('div');
-    modifiedCol.className = 'string-col';
-    const modifiedLabel = document.createElement('label');
-    modifiedLabel.textContent = 'Modified';
-    const modifiedInput = document.createElement('input');
-    modifiedInput.type = 'text';
-    modifiedInput.value = entry.current;
-    modifiedInput.maxLength = entry.original.length;
-    modifiedInput.setAttribute('aria-label', `Modified string at offset 0x${entry.offset.toString(16)}`);
-
-    modifiedInput.addEventListener('input', () => {
-      let filtered = modifiedInput.value.replace(/[^\x20-\x7E]/g, '');
-      if (filtered.length > entry.original.length) filtered = filtered.slice(0, entry.original.length);
-      modifiedInput.value = filtered;
-      entry.current = filtered;
-      updateBufferFromStrings(entry);
-      renderHexEditorPartial(entry.offset, entry.original.length);
-    });
-
-    modifiedCol.appendChild(modifiedLabel);
-    modifiedCol.appendChild(modifiedInput);
-
-    div.appendChild(label);
-    div.appendChild(originalCol);
-    div.appendChild(modifiedCol);
-
-    stringList.appendChild(div);
-  }
-
-  // Renders hex editor fully
-  function renderHexEditor() {
-    if (!buffer) {
-      hexEditor.innerHTML = 'Load a file first.';
-      return;
-    }
-
-    const bytesPerRow = 16;
-    const rows = Math.ceil(buffer.length / bytesPerRow);
-
-    // Build table header for offsets + hex + ASCII
-    let html = '<table><thead><tr><th>Offset</th>';
-    for (let i = 0; i < bytesPerRow; i++) {
-      html += `<th>${i.toString(16).toUpperCase().padStart(2, '0')}</th>`;
-    }
-    html += '<th>ASCII</th></tr></thead><tbody>';
-
-    for (let row = 0; row < rows; row++) {
-      const offset = row * bytesPerRow;
-      html += `<tr data-row="${row}"><td>0x${offset.toString(16).toUpperCase().padStart(8,'0')}</td>`;
-      // Hex cells
-      for (let col = 0; col < bytesPerRow; col++) {
-        const index = offset + col;
-        if (index < buffer.length) {
-          const val = buffer[index].toString(16).toUpperCase().padStart(2, '0');
-          html += `<td class="hex" data-index="${index}"><input maxlength="2" spellcheck="false" aria-label="Hex byte at offset 0x${index.toString(16)}" value="${val}"></td>`;
-        } else {
-          html += '<td></td>';
-        }
-      }
-      // ASCII cells
-      html += '<td class="ascii">';
-      for (let col = 0; col < bytesPerRow; col++) {
-        const index = offset + col;
-        if (index < buffer.length) {
-          const ch = buffer[index];
-          const charDisplay = (ch >= 0x20 && ch <= 0x7E) ? String.fromCharCode(ch) : '.';
-          html += `<input maxlength="1" spellcheck="false" aria-label="ASCII byte at offset 0x${index.toString(16)}" data-index="${index}" value="${charDisplay}">`;
-        } else {
-          html += ' ';
-        }
-      }
-      html += '</td></tr>';
-    }
-    html += '</tbody></table>';
-    hexEditor.innerHTML = html;
-
-    // Add event listeners to inputs in hex editor
-    addHexEditorListeners();
-  }
-
-  // Add event listeners to all hex and ascii inputs
-  function addHexEditorListeners() {
-    const hexInputs = hexEditor.querySelectorAll('td.hex input');
-    const asciiInputs = hexEditor.querySelectorAll('td.ascii input');
-
-    hexInputs.forEach(input => {
-      input.addEventListener('input', onHexInputChange);
-      input.addEventListener('keydown', onHexInputKeyDown);
-    });
-
-    asciiInputs.forEach(input => {
-      input.addEventListener('input', onAsciiInputChange);
-      input.addEventListener('keydown', onAsciiInputKeyDown);
-    });
-  }
-
-  // On hex input change: validate and update buffer, sync ASCII and strings if needed
-  function onHexInputChange(e) {
-    let val = e.target.value.toUpperCase();
-    // Keep only hex digits, max 2 chars
-    val = val.replace(/[^0-9A-F]/g, '').slice(0,2);
-    e.target.value = val;
-
-    if (val.length === 2) {
-      const byte = parseInt(val, 16);
-      const index = parseInt(e.target.parentElement.dataset.index);
-      if (!isNaN(byte) && index < buffer.length) {
-        buffer[index] = byte;
-
-        // Update ASCII input
-        const asciiInput = findAsciiInputByIndex(index);
-        if (asciiInput) {
-          asciiInput.value = (byte >= 0x20 && byte <= 0x7E) ? String.fromCharCode(byte) : '.';
-        }
-        updateStringEntryFromBuffer(index);
-      }
-      // Move focus right automatically
-      moveFocusHex(e.target, 1);
-    }
-  }
-  function onHexInputKeyDown(e) {
-    if (e.key === 'ArrowRight') {
-      e.preventDefault();
-      moveFocusHex(e.target, 1);
-    } else if (e.key === 'ArrowLeft') {
-      e.preventDefault();
-      moveFocusHex(e.target, -1);
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      moveFocusHexVertical(e.target, 1);
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      moveFocusHexVertical(e.target, -1);
-    }
-  }
-
-  // On ASCII input change: validate and update buffer, sync hex and strings if needed
-  function onAsciiInputChange(e) {
-    let val = e.target.value;
-    if (!val || val.length === 0) return;
-    let ch = val.charAt(0);
-    // Replace non-printable with '.'
-    if (ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) > 0x7E) {
-      ch = '.';
-      e.target.value = ch;
-    }
-    const index = parseInt(e.target.dataset.index);
-    if (index < buffer.length) {
-      buffer[index] = ch.charCodeAt(0);
-      // Update hex input
-      const hexInput = findHexInputByIndex(index);
-      if (hexInput) {
-        hexInput.value = buffer[index].toString(16).toUpperCase().padStart(2,'0');
-      }
-      updateStringEntryFromBuffer(index);
-    }
-    // Move focus right automatically
-    moveFocusAscii(e.target, 1);
-  }
-  function onAsciiInputKeyDown(e) {
-    if (e.key === 'ArrowRight') {
-      e.preventDefault();
-      moveFocusAscii(e.target, 1);
-    } else if (e.key === 'ArrowLeft') {
-      e.preventDefault();
-      moveFocusAscii(e.target, -1);
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      moveFocusAsciiVertical(e.target, 1);
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      moveFocusAsciiVertical(e.target, -1);
-    }
-  }
-
-  // Move focus helpers
-  function moveFocusHex(input, step) {
-    const inputs = Array.from(hexEditor.querySelectorAll('td.hex input'));
-    const idx = inputs.indexOf(input);
-    if (idx !== -1) {
-      const newIdx = idx + step;
-      if (newIdx >= 0 && newIdx < inputs.length) {
-        inputs[newIdx].focus();
-        inputs[newIdx].select();
-      }
-    }
-  }
-  function moveFocusHexVertical(input, step) {
-    const inputs = Array.from(hexEditor.querySelectorAll('td.hex input'));
-    const idx = inputs.indexOf(input);
-    const bytesPerRow = 16;
-    if (idx !== -1) {
-      const newIdx = idx + (step * bytesPerRow);
-      if (newIdx >= 0 && newIdx < inputs.length) {
-        inputs[newIdx].focus();
-        inputs[newIdx].select();
-      }
-    }
-  }
-  function moveFocusAscii(input, step) {
-    const inputs = Array.from(hexEditor.querySelectorAll('td.ascii input'));
-    const idx = inputs.indexOf(input);
-    if (idx !== -1) {
-      const newIdx = idx + step;
-      if (newIdx >= 0 && newIdx < inputs.length) {
-        inputs[newIdx].focus();
-        inputs[newIdx].select();
-      }
-    }
-  }
-  function moveFocusAsciiVertical(input, step) {
-    const inputs = Array.from(hexEditor.querySelectorAll('td.ascii input'));
-    const idx = inputs.indexOf(input);
-    const bytesPerRow = 16;
-    if (idx !== -1) {
-      const newIdx = idx + (step * bytesPerRow);
-      if (newIdx >= 0 && newIdx < inputs.length) {
-        inputs[newIdx].focus();
-        inputs[newIdx].select();
-      }
-    }
-  }
-
-  // Find hex input by index
-  function findHexInputByIndex(index) {
-    return hexEditor.querySelector(`td.hex input[data-index="${index}"]`);
-  }
-  // Find ascii input by index
-  function findAsciiInputByIndex(index) {
-    return hexEditor.querySelector(`td.ascii input[data-index="${index}"]`);
-  }
-
-  // Update string entry if buffer modified directly in hex editor
-  function updateStringEntryFromBuffer(modifiedIndex) {
-    // Find if modifiedIndex is inside any string entry range
-    for (const entry of entries) {
-      if (modifiedIndex >= entry.offset && modifiedIndex < entry.offset + entry.original.length) {
-        // Rebuild string from buffer for that entry
-        let newStr = '';
-        for (let i = 0; i < entry.original.length; i++) {
-          const b = buffer[entry.offset + i];
-          newStr += (b >= 0x20 && b <= 0x7E) ? String.fromCharCode(b) : '';
-        }
-        if (newStr !== entry.current) {
-          entry.current = newStr;
-          // Update the modified input in the strings list if visible
-          updateModifiedInputForEntry(entry);
-        }
-        break;
-      }
-    }
-  }
-
-  // Update modified input for a given entry in strings list
-  function updateModifiedInputForEntry(entry) {
-    // Find input by offset
-    const inputs = stringList.querySelectorAll('.string-item .string-col:nth-child(3) input, .string-item .string-col:nth-child(2) input');
-    for (const input of stringList.querySelectorAll('.string-item .string-col:nth-child(3) input')) {
-      const label = input.closest('.string-item').querySelector('.string-label').textContent;
-      const offsetHex = label.match(/\[0x([A-F0-9]+)\]/i);
-      if (!offsetHex) continue;
-      const offset = parseInt(offsetHex[1], 16);
-      if (offset === entry.offset) {
-        if (input.value !== entry.current) {
-          input.value = entry.current;
-        }
-        break;
-      }
-    }
-  }
-
-  // Partial render for hex editor rows touching a given offset + length
-  // (Update only affected row inputs with new buffer bytes)
-  function renderHexEditorPartial(offset, length) {
-    if (!buffer) return;
-    const bytesPerRow = 16;
-    const startRow = Math.floor(offset / bytesPerRow);
-    const endRow = Math.floor((offset + length - 1) / bytesPerRow);
-
-    for (let row = startRow; row <= endRow; row++) {
-      const tr = hexEditor.querySelector(`tr[data-row="${row}"]`);
-      if (!tr) continue;
-      for (let col = 0; col < bytesPerRow; col++) {
-        const index = row * bytesPerRow + col;
-        if (index >= buffer.length) continue;
-        // Hex input
-        const hexInput = tr.querySelector(`td.hex input[data-index="${index}"]`);
-        if (hexInput) {
-          const val = buffer[index].toString(16).toUpperCase().padStart(2,'0');
-          if (hexInput.value !== val) hexInput.value = val;
-        }
-        // ASCII input
-        const asciiInput = tr.querySelector(`td.ascii input[data-index="${index}"]`);
-        if (asciiInput) {
-          const ch = buffer[index];
-          const charDisplay = (ch >= 0x20 && ch <= 0x7E) ? String.fromCharCode(ch) : '.';
-          if (asciiInput.value !== charDisplay) asciiInput.value = charDisplay;
-        }
-      }
-    }
-  }
-
-  // Filter entries based on search input and rerender
-  function filterEntries() {
-    const query = searchInput.value;
-    if (!query) {
-      filteredEntries = entries.slice();
-    } else {
-      filteredEntries = entries.filter(e => e.original.includes(query));
-    }
-    renderEntries(filteredEntries);
-  }
-
-  fileInput.addEventListener('change', async e => {
-    const file = e.target.files[0];
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files[0];
     if (!file) return;
-
-    progressContainer.style.display = 'block';
-    progressBar.style.width = '0%';
-    progressBar.textContent = '0%';
 
     const arrayBuffer = await file.arrayBuffer();
     buffer = new Uint8Array(arrayBuffer);
 
-    await extractStringsProgressive(buffer);
-
-    filteredEntries = entries.slice();
-
-    renderHexEditor();
-
-    filterEntries();
-
-    progressContainer.style.display = 'none';
-
-    downloadBtn.disabled = false;
+    extractStrings(buffer);
+    renderStrings();
+    saveBtn.disabled = false;
   });
 
-  searchInput.addEventListener('input', filterEntries);
+  searchInput.addEventListener('input', () => {
+    renderStrings(searchInput.value);
+  });
 
-  downloadBtn.addEventListener('click', () => {
+  saveBtn.addEventListener('click', () => {
     if (!buffer) return;
     const blob = new Blob([buffer], {type: 'application/octet-stream'});
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'modified.dat';
+    a.download = 'modified_file.dat';
     document.body.appendChild(a);
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
   });
-
 })();
 </script>
 
