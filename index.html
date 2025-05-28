@@ -12,11 +12,49 @@
       background: #000; color: #eee; border: 1px solid #555; border-radius: 4px; padding: .4rem; font-size: 1rem;
     }
     #progress-container { display: none; width: 100%; max-width: 600px; margin: 0 auto 1rem; background: #333; border-radius: 8px; overflow: hidden; }
-    #progress-bar { height: 20px; width: 0%; background: #4caf50; text-align: center; color: #fff; font-weight: bold; }
+    #progress-bar { height: 20px; width: 0%; background: #4caf50; text-align: center; color: #fff; font-weight: bold; transition: width 0.2s ease; }
     #string-list { max-height: 60vh; overflow-y: auto; border: 1px solid #444; border-radius: 6px; padding: .5rem; }
-    .string-item { background: #1e1e1e; padding: .5rem; border-radius: 4px; margin-bottom: .5rem; }
-    .string-item label { display: block; font-size: .85rem; color: #90caf9; margin-bottom: .25rem; }
-    .string-item input { width: 100%; font-family: monospace; }
+    .string-item {
+      background: #1e1e1e;
+      padding: .5rem;
+      border-radius: 4px;
+      margin-bottom: .5rem;
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .string-label {
+      flex-basis: 100%;
+      color: #90caf9;
+      font-size: .85rem;
+      margin-bottom: .25rem;
+    }
+    .string-col {
+      flex: 1 1 45%;
+      display: flex;
+      flex-direction: column;
+    }
+    .string-col label {
+      font-size: .75rem;
+      margin-bottom: .15rem;
+      color: #bbb;
+    }
+    .string-col input {
+      width: 100%;
+      font-family: monospace;
+      font-size: 1rem;
+      background: #000;
+      border: 1px solid #555;
+      border-radius: 4px;
+      color: #eee;
+      padding: 0.3rem 0.5rem;
+    }
+    .string-col input[readonly] {
+      background: #222;
+      color: #777;
+      cursor: default;
+    }
   </style>
 </head>
 <body>
@@ -63,6 +101,7 @@
       reader.readAsArrayBuffer(file);
     });
 
+    // Extract ASCII strings (3+ chars) ending with 0x00 from buffer in chunks to avoid freezing
     function extractStrings(buf, callback) {
       const strings = [];
       const minLength = 3;
@@ -100,42 +139,82 @@
       processChunk();
     }
 
+    // Render strings in two columns: Original (readonly) and Modified (editable)
     function renderEntries(list) {
       stringList.innerHTML = '';
       const frag = document.createDocumentFragment();
+
       list.forEach((entry, idx) => {
         const div = document.createElement('div');
         div.className = 'string-item';
 
-        const label = document.createElement('label');
-        label.textContent = `[0x${entry.offset.toString(16)}] Original: "${entry.original}"`;
+        // Label with offset
+        const label = document.createElement('div');
+        label.className = 'string-label';
+        label.textContent = `[0x${entry.offset.toString(16)}]`;
 
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.value = entry.current;
-        input.maxLength = entry.original.length;
+        // Original column
+        const originalCol = document.createElement('div');
+        originalCol.className = 'string-col';
+        const originalLabel = document.createElement('label');
+        originalLabel.textContent = 'Original';
+        const originalInput = document.createElement('input');
+        originalInput.type = 'text';
+        originalInput.value = entry.original;
+        originalInput.readOnly = true;
+        originalCol.appendChild(originalLabel);
+        originalCol.appendChild(originalInput);
 
-        input.addEventListener('input', () => {
-          entry.current = input.value;
+        // Modified column
+        const modifiedCol = document.createElement('div');
+        modifiedCol.className = 'string-col';
+        const modifiedLabel = document.createElement('label');
+        modifiedLabel.textContent = 'Modified';
+        const modifiedInput = document.createElement('input');
+        modifiedInput.type = 'text';
+        modifiedInput.value = entry.current;
+        modifiedInput.maxLength = entry.original.length;
+
+        // Allow only ASCII chars and update entry.current on input
+        modifiedInput.addEventListener('input', () => {
+          // Filter non-ASCII chars
+          let filtered = modifiedInput.value.replace(/[^\x20-\x7E]/g, '');
+          if (filtered.length > entry.original.length) {
+            filtered = filtered.slice(0, entry.original.length);
+          }
+          modifiedInput.value = filtered;
+          entry.current = filtered;
         });
 
+        modifiedCol.appendChild(modifiedLabel);
+        modifiedCol.appendChild(modifiedInput);
+
         div.appendChild(label);
-        div.appendChild(input);
+        div.appendChild(originalCol);
+        div.appendChild(modifiedCol);
+
         frag.appendChild(div);
       });
+
       stringList.appendChild(frag);
     }
 
+    // Filter entries on search
     searchInput.addEventListener('input', () => {
       const q = searchInput.value.toLowerCase();
-      const filtered = entries.filter(e => e.original.toLowerCase().includes(q) || e.current.toLowerCase().includes(q));
+      const filtered = entries.filter(e =>
+        e.original.toLowerCase().includes(q) ||
+        e.current.toLowerCase().includes(q)
+      );
       renderEntries(filtered);
     });
 
+    // Download modified buffer
     downloadBtn.addEventListener('click', () => {
       if (!buffer || entries.length === 0) return;
       const updated = new Uint8Array(buffer);
       entries.forEach(e => {
+        // Pad with null bytes to keep original length
         const enc = new TextEncoder().encode(e.current.padEnd(e.original.length, '\0'));
         updated.set(enc.slice(0, e.original.length), e.offset);
       });
