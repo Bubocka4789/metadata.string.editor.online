@@ -186,42 +186,67 @@
       progressContainer.setAttribute('aria-valuenow', percent);
     }
 
-    // Extract ASCII strings (3+ chars) ending with 0x00 or at EOF, chunked async for UI responsiveness
+    // Ultra-safe extractStrings function with chunked async processing to avoid freezing
     function extractStrings(buf, callback) {
       const strings = [];
       const minLength = 3;
       const decoder = new TextDecoder('ascii');
+      const chunkSize = 5000; // smaller chunks for frequent yielding
       let i = 0;
-      const chunkSize = 50000;
+
+      // Async helper to scan a single string safely by yielding after every 200 chars
+      function scanString(start) {
+        return new Promise(resolve => {
+          let j = start;
+          function innerScan() {
+            let count = 0;
+            while (j < buf.length && buf[j] >= 0x20 && buf[j] <= 0x7E) {
+              j++;
+              count++;
+              if (count >= 200) {
+                setTimeout(innerScan, 0);
+                return;
+              }
+            }
+            resolve(j);
+          }
+          innerScan();
+        });
+      }
 
       function processChunk() {
+        if (i >= buf.length) {
+          callback(strings);
+          return;
+        }
         const end = Math.min(i + chunkSize, buf.length);
 
-        while (i < end) {
-          if (buf[i] >= 0x20 && buf[i] <= 0x7E) {
-            const start = i;
-            while (i < buf.length && buf[i] >= 0x20 && buf[i] <= 0x7E) i++;
-
-            // Accept string if followed by null terminator or end of buffer
-            if (i === buf.length || buf[i] === 0x00) {
-              const str = decoder.decode(buf.slice(start, i));
-              if (str.length >= minLength) {
-                strings.push({ offset: start, original: str, current: str });
+        (async function process() {
+          while (i < end) {
+            if (buf[i] >= 0x20 && buf[i] <= 0x7E) {
+              const start = i;
+              const j = await scanString(start);
+              if (j === buf.length || buf[j] === 0x00) {
+                const str = decoder.decode(buf.slice(start, j));
+                if (str.length >= minLength) {
+                  strings.push({ offset: start, original: str, current: str });
+                }
+                i = j + (j < buf.length && buf[j] === 0x00 ? 1 : 0);
+              } else {
+                i = j;
               }
-              if (i < buf.length && buf[i] === 0x00) i++; // skip null terminator
+            } else {
+              i++;
             }
-          } else {
-            i++;
+            if (i >= end) break;
           }
-        }
-
-        updateProgress(Math.floor((i / buf.length) * 100));
-
-        if (i < buf.length) {
-          setTimeout(processChunk, 0); // yield to UI thread
-        } else {
-          callback(strings);
-        }
+          updateProgress(Math.floor((i / buf.length) * 100));
+          if (i < buf.length) {
+            setTimeout(processChunk, 0);
+          } else {
+            callback(strings);
+          }
+        })();
       }
 
       processChunk();
