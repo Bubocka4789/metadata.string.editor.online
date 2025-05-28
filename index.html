@@ -1,134 +1,115 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Metadata String Editor</title>
-  <style>
-    body { margin: 0; font-family: system-ui; background: #121212; color: #e0e0e0; padding: 1rem; }
-    h1 { text-align: center; }
-    #controls { display: flex; gap: 1rem; margin-bottom: 1rem; justify-content: center; flex-wrap: wrap; }
-    #progress-container { display: block; background: #333; border-radius: 8px; overflow: hidden; width: 100%; max-width: 600px; margin: 0 auto 1rem; }
-    #progress-bar { height: 20px; width: 0%; background: #4caf50; text-align: center; color: #fff; font-weight: 600; font-size: .8rem; }
-    #search { padding: .4rem; width: 100%; max-width: 400px; background: #000; border: 1px solid #555; color: #eee; border-radius: 4px; }
-    #string-list { margin-top: 1rem; max-height: 60vh; overflow: auto; border: 1px solid #444; border-radius: 6px; padding: .5rem; }
-    .string-item { margin-bottom: .5rem; background: #1e1e1e; padding: .5rem; border-radius: 4px; }
-    .string-item label { font-size: .85rem; color: #90caf9; display: block; margin-bottom: .2rem; }
-    .string-item input[type="text"] { width: 100%; padding: .4rem; background: #000; color: #eee; border: 1px solid #555; border-radius: 4px; font-family: monospace; }
-    button { background: #333; color: #fff; border: none; padding: .5rem 1rem; border-radius: 4px; cursor: pointer; }
-    button:hover { background: #555; }
-  </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>IL2CPP Metadata String Editor</title>
+<style>
+  body{margin:0;padding:1rem;background:#121212;color:#e0e0e0;font-family:system-ui,monospace}
+  h1{text-align:center;margin-bottom:1rem}
+  #controls{display:flex;flex-wrap:wrap;gap:.5rem;justify-content:center;margin-bottom:1rem}
+  input[type="file"],input[type="text"],button{padding:.45rem .7rem;font-size:1rem;border-radius:4px;border:1px solid #555;background:#222;color:#eee}
+  button{cursor:pointer;background:#4caf50;border:none;color:#fff}
+  button:disabled{background:#555}
+  #progress-container{display:none;background:#333;border-radius:8px;overflow:hidden;height:24px;max-width:600px;margin:0 auto .8rem}
+  #progress-bar{height:100%;width:0%;background:#4caf50;text-align:center;line-height:24px;font-size:.8rem;font-weight:600;color:#fff;user-select:none}
+  #string-list{max-width:600px;margin:0 auto;border:1px solid #444;border-radius:6px;max-height:60vh;overflow:auto;background:#1e1e1e;padding:.5rem;font-size:.9rem}
+  .string-row{display:grid;grid-template-columns:110px 1fr 1fr;gap:.4rem;margin-bottom:.4rem;background:#282828;border-radius:4px;padding:.3rem}
+  .label{color:#90caf9;font-size:.8rem}
+  .orig{background:#000;border:1px solid #444;color:#aaa;padding:.25rem;border-radius:4px;overflow-wrap:break-word}
+  .edit{background:#000;border:1px solid #555;color:#eee;padding:.25rem;border-radius:4px;font-family:inherit}
+</style>
 </head>
 <body>
-  <h1>Metadata String Editor</h1>
-  <div id="controls">
-    <input type="file" id="file-input" accept=".dat">
-    <input type="text" id="search" placeholder="Search...">
-    <button id="download-btn">Download</button>
-  </div>
-  <div id="progress-container"><div id="progress-bar">0%</div></div>
-  <div id="string-list"></div>
+<h1>IL2CPP Metadata String Editor</h1>
+<div id="controls">
+  <input type="file" id="file-input" accept=".dat" />
+  <input type="text" id="search" placeholder="Search..." disabled />
+  <button id="download-btn" disabled>Download</button>
+</div>
+<div id="progress-container"><div id="progress-bar">0%</div></div>
+<div id="string-list"></div>
 
 <script>
-const fileInput = document.getElementById('file-input');
-const stringList = document.getElementById('string-list');
-const progressContainer = document.getElementById('progress-container');
-const progressBar = document.getElementById('progress-bar');
-const searchInput = document.getElementById('search');
-const downloadBtn = document.getElementById('download-btn');
+const fileInput=document.getElementById('file-input');
+const searchInput=document.getElementById('search');
+const downloadBtn=document.getElementById('download-btn');
+const pContainer=document.getElementById('progress-container');
+const pBar=document.getElementById('progress-bar');
+const list=document.getElementById('string-list');
 
-let entries = [], buffer;
+let bytes,entries=[];
+const pageSize=300; // render batch
+let chunkParsed=false;
 
-fileInput.addEventListener('change', () => {
-  const file = fileInput.files[0];
-  if (!file) return;
-
-  const reader = new FileReader();
-  reader.onload = () => {
-    buffer = new Uint8Array(reader.result);
-    progressContainer.style.display = 'block';
-    entries = extractStrings(buffer);
-    progressBar.style.width = '100%';
-    progressBar.textContent = 'Done';
-    renderEntries(entries);
-  };
-  reader.readAsArrayBuffer(file);
+fileInput.addEventListener('change',async()=>{
+  const file=fileInput.files[0];
+  if(!file)return;
+  bytes=new Uint8Array(await file.arrayBuffer());
+  entries=[];list.innerHTML='';
+  searchInput.disabled=true;downloadBtn.disabled=true;
+  pBar.style.width='0%';pBar.textContent='0%';pContainer.style.display='block';
+  await parseFile();
 });
 
-function extractStrings(buf) {
-  const strings = [];
-  const minLength = 3;
-  const decoder = new TextDecoder('ascii');
-  let i = 0;
-  while (i < buf.length) {
-    if (buf[i] >= 0x20 && buf[i] <= 0x7E) {
-      const start = i;
-      while (i < buf.length && buf[i] >= 0x20 && buf[i] <= 0x7E) i++;
-      if (i < buf.length && buf[i] === 0x00) {
-        const str = decoder.decode(buf.slice(start, i));
-        if (str.length >= minLength) {
-          strings.push({ offset: start, original: str, current: str });
+async function parseFile(){
+  const dec=new TextDecoder('ascii');
+  const minLen=3,chunk=32*1024; // 32KB
+  let offset=0,lastUI=0;
+  const total=bytes.length;
+  while(offset<total){
+    const end=Math.min(offset+chunk,total);
+    for(let i=offset;i<end;i++){
+      if(bytes[i]>=0x20&&bytes[i]<=0x7E){
+        const start=i;
+        while(i<total&&bytes[i]>=0x20&&bytes[i]<=0x7E)i++;
+        if(i<total&&bytes[i]===0x00){
+          const str=dec.decode(bytes.slice(start,i));
+          if(str.length>=minLen)entries.push({offset:start,original:str,current:str});
         }
       }
     }
-    i++;
-    if (i % 100000 === 0) {
-      const percent = Math.floor((i / buf.length) * 100);
-      progressBar.style.width = percent + '%';
-      progressBar.textContent = percent + '%';
-    }
+    offset=end;
+    const pct=Math.floor(offset/total*100);
+    if(pct-lastUI>=2||pct===100){pBar.style.width=pct+'%';pBar.textContent=pct+'%';lastUI=pct;}
+    await new Promise(r=>setTimeout(r,0)); // yield
   }
-  return strings;
-}
-
-function renderEntries(list) {
-  stringList.innerHTML = '';
-  const fragment = document.createDocumentFragment();
-  list.forEach((e, idx) => {
-    const div = document.createElement('div');
-    div.className = 'string-item';
-
-    const label = document.createElement('label');
-    label.textContent = `Offset 0x${e.offset.toString(16)} | Original: ${e.original}`;
-
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.value = e.current;
-    input.maxLength = e.original.length;
-    input.addEventListener('input', () => {
-      if (input.value.length <= e.original.length) {
-        e.current = input.value;
-      } else {
-        input.value = e.current;
-      }
-    });
-
-    div.appendChild(label);
-    div.appendChild(input);
-    fragment.appendChild(div);
-  });
-  stringList.appendChild(fragment);
-}
-
-searchInput.addEventListener('input', () => {
-  const query = searchInput.value.toLowerCase();
-  const filtered = entries.filter(e => e.original.toLowerCase().includes(query) || e.current.toLowerCase().includes(query));
-  renderEntries(filtered);
+  pContainer.style.display='none';
+  if(entries.length===0){list.textContent='No strings found.';return;}
+  searchInput.disabled=false;downloadBtn.disabled=false;
+  renderList(entries.slice(0,pageSize));
 });
 
-downloadBtn.addEventListener('click', () => {
-  const updated = new Uint8Array(buffer);
-  entries.forEach(e => {
-    const encoded = new TextEncoder().encode(e.current.padEnd(e.original.length, '\0'));
-    updated.set(encoded.slice(0, e.original.length), e.offset);
+function renderList(arr){
+  list.innerHTML='';
+  const frag=document.createDocumentFragment();
+  arr.forEach((e,i)=>{
+    const row=document.createElement('div');row.className='string-row';
+    const lab=document.createElement('div');lab.className='label';lab.textContent=`0x${e.offset.toString(16)}`;row.appendChild(lab);
+    const orig=document.createElement('div');orig.className='orig';orig.textContent=e.original;row.appendChild(orig);
+    const inp=document.createElement('input');inp.className='edit';inp.value=e.current;inp.maxLength=e.original.length;
+    inp.addEventListener('input',()=>{if(inp.value.length<=e.original.length)e.current=inp.value;else inp.value=e.current;});
+    row.appendChild(inp);frag.appendChild(row);
   });
-  const blob = new Blob([updated], { type: 'application/octet-stream' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'modified-metadata.dat';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  list.appendChild(frag);
+}
+
+searchInput.addEventListener('input',()=>{
+  const q=searchInput.value.toLowerCase();
+  const subset=entries.filter(e=>e.original.toLowerCase().includes(q)||e.current.toLowerCase().includes(q));
+  renderList(subset.slice(0,pageSize));
+});
+
+downloadBtn.addEventListener('click',()=>{
+  if(!bytes||entries.length===0)return;
+  const out=new Uint8Array(bytes);
+  const enc=new TextEncoder();
+  entries.forEach(e=>{
+    const data=enc.encode(e.current.padEnd(e.original.length,'\0'));
+    out.set(data.slice(0,e.original.length),e.offset);
+  });
+  const blob=new Blob([out],{type:'application/octet-stream'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='modified_metadata.dat';a.click();URL.revokeObjectURL(a.href);
 });
 </script>
 </body>
