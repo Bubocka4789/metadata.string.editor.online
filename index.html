@@ -136,7 +136,7 @@
   <h1>Metadata String Editor</h1>
   <div id="controls">
     <input type="file" id="file-input" accept=".dat" aria-label="Load .dat file" />
-    <input type="text" id="search" placeholder="Search..." aria-label="Search strings" />
+    <input type="text" id="search" placeholder="Search (case sensitive)" aria-label="Search strings" />
     <button id="download-btn" aria-label="Download modified file">Download</button>
   </div>
   <div id="progress-container" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
@@ -154,14 +154,13 @@
 
     let entries = [];
     let buffer = null;
-    let filteredEntries = null;
 
     fileInput.addEventListener('change', () => {
       const file = fileInput.files[0];
       if (!file) return;
 
       entries = [];
-      filteredEntries = null;
+      buffer = null;
       stringList.innerHTML = '';
       progressContainer.style.display = 'block';
       updateProgress(0);
@@ -179,14 +178,13 @@
       reader.readAsArrayBuffer(file);
     });
 
-    // Updates progress bar UI
     function updateProgress(percent) {
       progressBar.style.width = percent + '%';
       progressBar.textContent = percent + '%';
       progressContainer.setAttribute('aria-valuenow', percent);
     }
 
-    // Append single entry to DOM
+    // Append one entry to DOM
     function appendEntryToDOM(entry) {
       const div = document.createElement('div');
       div.className = 'string-item';
@@ -236,8 +234,8 @@
       stringList.appendChild(div);
     }
 
-    // Render list of entries (clears existing list)
-    function renderEntries(list) {
+    // Render list fully, used by search to replace all shown entries
+    function renderList(list) {
       stringList.innerHTML = '';
       if (list.length === 0) {
         stringList.textContent = 'No strings found.';
@@ -248,14 +246,14 @@
       stringList.appendChild(fragment);
     }
 
-    // Extract ASCII strings (3+ chars) ending with 0x00 or EOF, asynchronously yields to UI thread, shows strings live
+    // Extract strings live without filtering during extraction (show ALL)
     function extractStringsLive(buf, doneCallback) {
       const minLength = 3;
       const decoder = new TextDecoder('ascii');
       let i = 0;
 
       function nextChunk() {
-        let stringsFoundThisTick = 0;
+        let countThisTick = 0;
 
         while (i < buf.length) {
           if (buf[i] >= 0x20 && buf[i] <= 0x7E) {
@@ -266,11 +264,9 @@
               if (str.length >= minLength) {
                 const entry = { offset: start, original: str, current: str };
                 entries.push(entry);
-                if (!filteredEntries) {
-                  appendEntryToDOM(entry);  // show strings live
-                }
-                stringsFoundThisTick++;
-                if (stringsFoundThisTick >= 10) break; // yield after 10 strings
+                appendEntryToDOM(entry); // append all live for instant feedback
+                countThisTick++;
+                if (countThisTick >= 50) break; // yield every 50 found strings
               }
               if (i < buf.length && buf[i] === 0x00) i++;
             }
@@ -290,28 +286,22 @@
       nextChunk();
     }
 
-    // Search input: case sensitive filtering
+    // Search case sensitive: filter entries and render only matches
     searchInput.addEventListener('input', () => {
       const query = searchInput.value;
       if (!query) {
-        filteredEntries = null;
-        stringList.innerHTML = '';
-        entries.forEach(appendEntryToDOM);  // show all entries again
+        renderList(entries);
         return;
       }
-      filteredEntries = entries.filter(e =>
-        e.original.includes(query) || e.current.includes(query) // case sensitive match
-      );
-      renderEntries(filteredEntries);
+      const filtered = entries.filter(e => e.original.includes(query) || e.current.includes(query));
+      renderList(filtered);
     });
 
-    // Download the buffer with modifications applied
     downloadBtn.addEventListener('click', () => {
       if (!buffer || entries.length === 0) return;
 
       const updated = new Uint8Array(buffer); // copy original buffer
       entries.forEach(e => {
-        // Pad modified string with null bytes to maintain original length
         const enc = new TextEncoder().encode(e.current.padEnd(e.original.length, '\0'));
         updated.set(enc.slice(0, e.original.length), e.offset);
       });
