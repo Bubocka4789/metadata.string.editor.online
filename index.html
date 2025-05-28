@@ -3,63 +3,95 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Robust Global Metadata String Editor</title>
+<title>Virtualized Global Metadata String Editor</title>
 <style>
   body {
-    background: #121212; color: #eee; font-family: monospace; margin:0; padding:1rem;
-    display: flex; flex-direction: column; height: 100vh;
+    background: #121212; color: #eee; font-family: monospace; margin: 0; padding: 1rem;
+    height: 100vh; display: flex; flex-direction: column;
   }
   #topbar {
     display: flex; gap: 1rem; margin-bottom: 1rem; align-items: center;
   }
-  input[type="file"] {
+  input[type="file"], input[type="text"], button {
     background: #222; border: none; padding: 0.5rem; color: #eee; border-radius: 4px;
+    font-family: monospace; font-size: 1rem;
   }
   input[type="text"] {
-    background: #222; border: none; padding: 0.5rem; color: #eee; border-radius: 4px;
     flex: 1;
   }
   button {
-    background: #4caf50; border:none; padding: 0.5rem 1rem; border-radius: 4px; color:#121212;
     cursor: pointer;
   }
   button:disabled {
-    background: #666; cursor: default;
+    background: #555; cursor: default;
   }
   #progress-container {
     width: 100%; height: 22px; background: #333; border-radius: 11px; overflow: hidden;
     margin-bottom: 1rem;
   }
   #progress-bar {
-    height: 100%; width: 0%; background: #4caf50; transition: width 0.2s ease;
+    height: 100%; width: 0%; background: #4caf50; transition: width 0.15s ease;
     display: flex; align-items: center; justify-content: center; font-size: 0.9rem;
-    color: #121212; font-weight: bold; user-select:none;
+    color: #121212; font-weight: bold; user-select: none;
+  }
+  #string-list-container {
+    flex: 1;
+    position: relative;
+    border: 1px solid #444;
+    border-radius: 6px;
+    overflow-y: auto;
+    background: #1e1e1e;
+    font-size: 14px;
   }
   #string-list {
-    flex: 1; overflow-y: auto; background: #1e1e1e; border: 1px solid #444; border-radius: 6px;
-    padding: 0.5rem;
+    position: relative;
+    width: 100%;
   }
   .string-item {
-    display: flex; gap: 1rem; margin-bottom: 0.3rem; align-items: center;
+    box-sizing: border-box;
+    display: flex;
+    gap: 1rem;
+    padding: 0.3rem 0.5rem;
+    border-bottom: 1px solid #333;
+    background: #222;
+    color: #eee;
+    position: absolute;
+    width: 100%;
+    left: 0;
+    height: 32px;
+    align-items: center;
   }
   .string-col {
-    flex: 1 1 45%; display: flex; flex-direction: column;
+    flex: 1 1 45%;
+    display: flex;
+    flex-direction: column;
   }
   label {
-    font-size: 0.7rem; color: #bbb; margin-bottom: 0.1rem; user-select:none;
+    font-size: 0.65rem;
+    color: #bbb;
+    user-select: none;
   }
   input.string-input {
-    background: #000; border: 1px solid #555; border-radius: 4px; color: #eee;
-    padding: 0.2rem 0.4rem; font-family: monospace; font-size: 1rem;
+    background: #000;
+    border: 1px solid #555;
+    border-radius: 4px;
+    color: #eee;
+    padding: 0.1rem 0.3rem;
+    font-family: monospace;
+    font-size: 1rem;
     width: 100%;
     box-sizing: border-box;
   }
   input[readonly] {
-    background: #222; color: #777; cursor: default;
+    background: #222;
+    color: #777;
+    cursor: default;
   }
   #status-text {
-    margin-top: 0.5rem; font-size: 0.9rem; color: #888;
-    user-select:none;
+    margin-top: 0.5rem;
+    font-size: 0.9rem;
+    color: #888;
+    user-select: none;
   }
 </style>
 </head>
@@ -75,162 +107,70 @@
   <div id="progress-bar">0%</div>
 </div>
 
-<div id="string-list" aria-live="polite" aria-relevant="additions"></div>
-<div id="status-text"></div>
+<div id="string-list-container" tabindex="0" aria-live="polite" aria-relevant="additions">
+  <div id="string-list"></div>
+</div>
+
+<div id="status-text">Load a .dat file to start.</div>
 
 <script>
 (() => {
   const fileInput = document.getElementById('file-input');
   const progressBar = document.getElementById('progress-bar');
   const progressContainer = document.getElementById('progress-container');
+  const stringListContainer = document.getElementById('string-list-container');
   const stringList = document.getElementById('string-list');
   const searchInput = document.getElementById('search');
   const downloadBtn = document.getElementById('download-btn');
   const statusText = document.getElementById('status-text');
 
-  // Global variables for file buffer and string entries
   let buffer = null;
   let entries = [];
   let filteredEntries = [];
-  let originalDomCache = new Map(); // cache original DOM nodes keyed by entry id
-  let visibleEntryCount = 0;
 
-  // Config
-  const BATCH_STRINGS_RENDER = 50;    // how many strings to append to DOM per batch render call
-  const MAX_VISIBLE_RESULTS = 1000;   // max number of strings shown for performance (pagination can be added)
-  const MIN_STRING_LEN = 3;
-
-  // Helpers
   const textDecoder = new TextDecoder('ascii');
   const textEncoder = new TextEncoder();
 
-  // requestIdleCallback fallback
-  const idleCallback = window.requestIdleCallback || function (fn) { return setTimeout(fn, 50); };
+  const MIN_STRING_LEN = 3;
+  const ITEM_HEIGHT = 32; // px height of one string item row
 
-  // Utility debounce function for search input
+  // requestIdleCallback fallback
+  const idleCallback = window.requestIdleCallback || function(fn) { return setTimeout(fn, 50); };
+
+  // Debounce utility
   function debounce(fn, delay) {
-    let timeout;
+    let timer;
     return (...args) => {
-      clearTimeout(timeout);
-      timeout = setTimeout(() => fn(...args), delay);
+      clearTimeout(timer);
+      timer = setTimeout(() => fn(...args), delay);
     };
   }
 
-  // Update progress bar UI
+  // Progress bar update
   function updateProgress(percent) {
     progressBar.style.width = percent + '%';
     progressBar.textContent = percent + '%';
     progressContainer.setAttribute('aria-valuenow', percent);
   }
 
-  // Clear all current displayed strings from DOM and cache
-  function clearDisplayedStrings() {
-    stringList.innerHTML = '';
-    originalDomCache.clear();
-    visibleEntryCount = 0;
+  // Status update
+  function updateStatus(text) {
+    statusText.textContent = text;
   }
 
-  // Create a DOM element for one string entry (or reuse cached one)
-  function createOrReuseEntryElement(entry) {
-    if (originalDomCache.has(entry.id)) {
-      return originalDomCache.get(entry.id);
-    }
-
-    const div = document.createElement('div');
-    div.className = 'string-item';
-    div.dataset.id = entry.id;
-
-    // Original string column
-    const colOrig = document.createElement('div');
-    colOrig.className = 'string-col';
-    const labelOrig = document.createElement('label');
-    labelOrig.textContent = `Offset: 0x${entry.offset.toString(16).toUpperCase().padStart(8, '0')}`;
-    const inputOrig = document.createElement('input');
-    inputOrig.type = 'text';
-    inputOrig.readOnly = true;
-    inputOrig.className = 'string-input';
-    inputOrig.value = entry.original;
-
-    colOrig.appendChild(labelOrig);
-    colOrig.appendChild(inputOrig);
-
-    // Modified string column
-    const colMod = document.createElement('div');
-    colMod.className = 'string-col';
-    const labelMod = document.createElement('label');
-    labelMod.textContent = 'Modified';
-    const inputMod = document.createElement('input');
-    inputMod.type = 'text';
-    inputMod.className = 'string-input';
-    inputMod.value = entry.modified;
-
-    // On user input, update entry.modified (filter out non-printable ascii)
-    inputMod.addEventListener('input', () => {
-      let val = inputMod.value;
-      // Allow printable ASCII only (space to ~)
-      val = val.replace(/[^\x20-\x7E]/g, '');
-      if (val !== inputMod.value) inputMod.value = val;
-      entry.modified = val;
-    });
-
-    colMod.appendChild(labelMod);
-    colMod.appendChild(inputMod);
-
-    div.appendChild(colOrig);
-    div.appendChild(colMod);
-
-    originalDomCache.set(entry.id, div);
-    return div;
-  }
-
-  // Render a batch of strings to DOM incrementally to avoid freezes
-  function renderStringsIncrementally(strings, startIndex = 0) {
-    if (startIndex >= strings.length || visibleEntryCount >= MAX_VISIBLE_RESULTS) {
-      updateStatus(`Displayed ${visibleEntryCount} strings.`);
-      return;
-    }
-
-    const fragment = document.createDocumentFragment();
-    let count = 0;
-
-    for (let i = startIndex; i < strings.length && count < BATCH_STRINGS_RENDER && visibleEntryCount < MAX_VISIBLE_RESULTS; i++, count++, visibleEntryCount++) {
-      fragment.appendChild(createOrReuseEntryElement(strings[i]));
-    }
-
-    stringList.appendChild(fragment);
-
-    // Schedule next batch
-    idleCallback(() => {
-      renderStringsIncrementally(strings, startIndex + count);
-    });
-  }
-
-  // Show filtered strings with batching and virtual limit
-  function showFilteredStrings(query) {
-    clearDisplayedStrings();
-
-    if (!query) {
-      filteredEntries = entries;
-    } else {
-      filteredEntries = entries.filter(e => e.original.includes(query) || e.modified.includes(query));
-    }
-
-    visibleEntryCount = 0;
-    renderStringsIncrementally(filteredEntries);
-  }
-
-  // Incrementally extract strings from file buffer in small chunks to avoid freezes
+  // Incremental string extraction (ASCII printable sequences)
   function incrementalExtractStrings(buf) {
     entries = [];
-    clearDisplayedStrings();
+    filteredEntries = [];
+    progressContainer.style.display = 'block';
+    updateProgress(0);
+    updateStatus('Extracting strings...');
+    searchInput.disabled = true;
+    downloadBtn.disabled = true;
 
     const len = buf.length;
     let pos = 0;
     let idCounter = 0;
-
-    updateStatus('Extracting strings...');
-    progressContainer.style.display = 'block';
-    updateProgress(0);
 
     function extractChunk(deadline) {
       while ((deadline.timeRemaining() > 0 || deadline.didTimeout) && pos < len) {
@@ -246,87 +186,203 @@
           pos++;
         }
       }
-
       updateProgress(Math.floor((pos / len) * 100));
-
       if (pos < len) {
-        requestIdleCallback(extractChunk, { timeout: 50 });
+        idleCallback(extractChunk, { timeout: 50 });
       } else {
         updateProgress(100);
         progressContainer.style.display = 'none';
         updateStatus(`Extraction complete. ${entries.length} strings found.`);
+        filteredEntries = entries;
         searchInput.disabled = false;
         downloadBtn.disabled = false;
-        filteredEntries = entries;
-        renderStringsIncrementally(entries);
+        resetVirtualList();
       }
     }
 
-    requestIdleCallback(extractChunk, { timeout: 50 });
+    idleCallback(extractChunk, { timeout: 50 });
   }
 
-  // Update status text below list
-  function updateStatus(text) {
-    statusText.textContent = text;
+  // Search filtering
+  function filterEntries(query) {
+    if (!query) return entries;
+    return entries.filter(e => e.original.includes(query) || e.modified.includes(query));
   }
 
-  // File load event
+  // Virtual list state
+  let scrollTop = 0;
+  let viewportHeight = 0;
+  let visibleStartIndex = 0;
+  let visibleEndIndex = 0;
+  let pool = []; // DOM elements pool for reuse
+
+  // Create one string item element (reusable)
+  function createStringItem() {
+    const div = document.createElement('div');
+    div.className = 'string-item';
+
+    const colOrig = document.createElement('div');
+    colOrig.className = 'string-col';
+    const labelOrig = document.createElement('label');
+    labelOrig.textContent = 'Offset';
+    const inputOrig = document.createElement('input');
+    inputOrig.type = 'text';
+    inputOrig.readOnly = true;
+    inputOrig.className = 'string-input';
+    colOrig.appendChild(labelOrig);
+    colOrig.appendChild(inputOrig);
+
+    const colOriginalStr = document.createElement('div');
+    colOriginalStr.className = 'string-col';
+    const labelOriginalStr = document.createElement('label');
+    labelOriginalStr.textContent = 'Original String';
+    const inputOriginalStr = document.createElement('input');
+    inputOriginalStr.type = 'text';
+    inputOriginalStr.readOnly = true;
+    inputOriginalStr.className = 'string-input';
+    colOriginalStr.appendChild(labelOriginalStr);
+    colOriginalStr.appendChild(inputOriginalStr);
+
+    const colModifiedStr = document.createElement('div');
+    colModifiedStr.className = 'string-col';
+    const labelModifiedStr = document.createElement('label');
+    labelModifiedStr.textContent = 'Modified String';
+    const inputModifiedStr = document.createElement('input');
+    inputModifiedStr.type = 'text';
+    inputModifiedStr.className = 'string-input';
+    colModifiedStr.appendChild(labelModifiedStr);
+    colModifiedStr.appendChild(inputModifiedStr);
+
+    div.appendChild(colOrig);
+    div.appendChild(colOriginalStr);
+    div.appendChild(colModifiedStr);
+
+    // Events
+    inputModifiedStr.addEventListener('input', e => {
+      const idx = div._virtualIndex;
+      if (idx == null) return;
+      const entry = filteredEntries[idx];
+      if (!entry) return;
+
+      entry.modified = e.target.value;
+    });
+
+    return div;
+  }
+
+  // Initialize pool with fixed number of elements
+  function initPool(size) {
+    pool.forEach(elem => elem.remove());
+    pool = [];
+    for (let i = 0; i < size; i++) {
+      const item = createStringItem();
+      stringList.appendChild(item);
+      pool.push(item);
+    }
+  }
+
+  // Reset virtual list on new data or filter change
+  function resetVirtualList() {
+    // Set stringList container height to total height to enable scrolling
+    stringList.style.height = (filteredEntries.length * ITEM_HEIGHT) + 'px';
+
+    viewportHeight = stringListContainer.clientHeight;
+    const visibleCount = Math.min(filteredEntries.length, Math.ceil(viewportHeight / ITEM_HEIGHT) + 5);
+
+    initPool(visibleCount);
+    renderVisibleItems();
+  }
+
+  // Render visible items based on scrollTop
+  function renderVisibleItems() {
+    scrollTop = stringListContainer.scrollTop;
+    visibleStartIndex = Math.floor(scrollTop / ITEM_HEIGHT);
+    const visibleCount = pool.length;
+    visibleEndIndex = Math.min(visibleStartIndex + visibleCount, filteredEntries.length);
+
+    for (let i = 0; i < pool.length; i++) {
+      const item = pool[i];
+      const entryIndex = visibleStartIndex + i;
+      if (entryIndex >= filteredEntries.length) {
+        item.style.display = 'none';
+        item._virtualIndex = null;
+        continue;
+      }
+      const entry = filteredEntries[entryIndex];
+      item.style.display = 'flex';
+      item.style.top = (entryIndex * ITEM_HEIGHT) + 'px';
+      item._virtualIndex = entryIndex;
+
+      const inputs = item.querySelectorAll('input.string-input');
+      // offset input (readonly)
+      inputs[0].value = entry.offset;
+
+      // original string (readonly)
+      inputs[1].value = entry.original;
+
+      // modified string (editable)
+      if (inputs[2].value !== entry.modified) {
+        inputs[2].value = entry.modified;
+      }
+    }
+  }
+
+  // Scroll handler
+  stringListContainer.addEventListener('scroll', () => {
+    requestAnimationFrame(renderVisibleItems);
+  });
+
+  // Search input handler with debounce
+  const onSearchInput = debounce(() => {
+    const query = searchInput.value;
+    filteredEntries = filterEntries(query);
+    resetVirtualList();
+  }, 250);
+
+  searchInput.addEventListener('input', onSearchInput);
+
+  // File load handler
   fileInput.addEventListener('change', () => {
+    if (fileInput.files.length === 0) return;
     const file = fileInput.files[0];
-    if (!file) return;
+    const reader = new FileReader();
 
-    searchInput.value = '';
     searchInput.disabled = true;
     downloadBtn.disabled = true;
-    entries = [];
-    filteredEntries = [];
-    originalDomCache.clear();
-    stringList.innerHTML = '';
-    visibleEntryCount = 0;
-    buffer = null;
-    updateStatus('');
+    progressContainer.style.display = 'block';
+    updateProgress(0);
+    updateStatus('Reading file...');
 
-    const reader = new FileReader();
     reader.onload = () => {
       buffer = new Uint8Array(reader.result);
       incrementalExtractStrings(buffer);
     };
+    reader.onerror = () => {
+      updateStatus('Error reading file.');
+      progressContainer.style.display = 'none';
+    };
     reader.readAsArrayBuffer(file);
   });
 
-  // Debounced search input handling
-  searchInput.addEventListener('input', debounce(() => {
-    if (!buffer) return;
-    const q = searchInput.value;
-    updateStatus(q ? `Searching for "${q}"...` : '');
-    showFilteredStrings(q);
-  }, 250));
-
-  // Download patched file event
+  // Download patched file with modified strings replaced
   downloadBtn.addEventListener('click', () => {
-    if (!buffer || entries.length === 0) return;
-
-    updateStatus('Generating patched file...');
-
-    // Create copy of original buffer for patching
+    if (!buffer) return;
+    updateStatus('Patching file...');
     const patched = new Uint8Array(buffer);
 
-    // Patch strings in-place
-    entries.forEach(e => {
-      // Prepare encoded modified string padded or truncated to original length
-      let modStr = e.modified;
-      if (modStr.length > e.original.length) {
-        // If longer, truncate to original length (for safety)
-        modStr = modStr.slice(0, e.original.length);
-      } else if (modStr.length < e.original.length) {
-        // Pad with null bytes to keep offset stable
-        modStr = modStr.padEnd(e.original.length, '\0');
+    filteredEntries.forEach(e => {
+      const modStr = e.modified;
+      // If shorter, pad with \0, if longer, truncate
+      let modEncoded = textEncoder.encode(modStr);
+      if (modEncoded.length < e.original.length) {
+        const padding = new Uint8Array(e.original.length - modEncoded.length);
+        modEncoded = new Uint8Array([...modEncoded, ...padding]);
+      } else if (modEncoded.length > e.original.length) {
+        modEncoded = modEncoded.slice(0, e.original.length);
       }
-      const modEncoded = textEncoder.encode(modStr);
       patched.set(modEncoded, e.offset);
     });
 
-    // Trigger download
     const blob = new Blob([patched], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
 
@@ -339,10 +395,15 @@
     updateStatus('Download complete.');
   });
 
-  // Init UI state
+  // Init UI
   searchInput.disabled = true;
   downloadBtn.disabled = true;
   updateStatus('Load a .dat file to start.');
+
+  // Resize observer for container height changes
+  new ResizeObserver(() => {
+    if (filteredEntries.length) resetVirtualList();
+  }).observe(stringListContainer);
 })();
 </script>
 
