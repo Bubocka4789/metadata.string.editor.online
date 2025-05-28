@@ -7,14 +7,16 @@
   <style>
     body { margin: 0; font-family: system-ui; background: #121212; color: #e0e0e0; padding: 1rem; }
     h1 { text-align: center; }
-    #controls { display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center; margin-bottom: 1rem; }
-    input, button { padding: .4rem; font-size: 1rem; border-radius: 4px; border: 1px solid #555; background: #000; color: #fff; }
-    #progress-container { background: #333; border-radius: 8px; overflow: hidden; width: 100%; max-width: 600px; margin: 0 auto 1rem; height: 20px; }
-    #progress-bar { height: 100%; width: 0%; background: #4caf50; text-align: center; line-height: 20px; color: #fff; font-weight: 600; font-size: .8rem; }
-    #string-list { max-height: 60vh; overflow: auto; border: 1px solid #444; border-radius: 6px; padding: .5rem; }
-    .string-item { background: #1e1e1e; margin-bottom: .5rem; padding: .5rem; border-radius: 4px; }
-    .string-item label { font-size: .85rem; color: #90caf9; display: block; margin-bottom: .2rem; }
-    .string-item input { width: 100%; background: #000; color: #eee; border: 1px solid #555; font-family: monospace; padding: .3rem; }
+    #controls { display: flex; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; justify-content: center; }
+    input[type="file"], input[type="text"], button {
+      background: #000; color: #eee; border: 1px solid #555; border-radius: 4px; padding: .4rem; font-size: 1rem;
+    }
+    #progress-container { display: none; width: 100%; max-width: 600px; margin: 0 auto 1rem; background: #333; border-radius: 8px; overflow: hidden; }
+    #progress-bar { height: 20px; width: 0%; background: #4caf50; text-align: center; color: #fff; font-weight: bold; }
+    #string-list { max-height: 60vh; overflow-y: auto; border: 1px solid #444; border-radius: 6px; padding: .5rem; }
+    .string-item { background: #1e1e1e; padding: .5rem; border-radius: 4px; margin-bottom: .5rem; }
+    .string-item label { display: block; font-size: .85rem; color: #90caf9; margin-bottom: .25rem; }
+    .string-item input { width: 100%; font-family: monospace; }
   </style>
 </head>
 <body>
@@ -29,13 +31,13 @@
 
   <script>
     const fileInput = document.getElementById('file-input');
-    const stringList = document.getElementById('string-list');
     const progressBar = document.getElementById('progress-bar');
+    const progressContainer = document.getElementById('progress-container');
+    const stringList = document.getElementById('string-list');
     const searchInput = document.getElementById('search');
     const downloadBtn = document.getElementById('download-btn');
 
-    let entries = [];
-    let buffer = null;
+    let entries = [], buffer;
 
     fileInput.addEventListener('change', () => {
       const file = fileInput.files[0];
@@ -45,17 +47,28 @@
       reader.onload = () => {
         buffer = new Uint8Array(reader.result);
         entries = [];
+        stringList.innerHTML = '';
+        progressContainer.style.display = 'block';
         progressBar.style.width = '0%';
-        extractStringsChunked(buffer);
+        progressBar.textContent = '0%';
+
+        extractStrings(buffer, (results) => {
+          entries = results;
+          renderEntries(entries);
+          progressBar.textContent = 'Done';
+          progressBar.style.width = '100%';
+          progressContainer.style.display = 'none';
+        });
       };
       reader.readAsArrayBuffer(file);
     });
 
-    function extractStringsChunked(buf) {
+    function extractStrings(buf, callback) {
+      const strings = [];
+      const minLength = 3;
       const decoder = new TextDecoder('ascii');
       let i = 0;
       const chunkSize = 50000;
-      const minLength = 3;
 
       function processChunk() {
         const end = Math.min(i + chunkSize, buf.length);
@@ -64,9 +77,9 @@
             const start = i;
             while (i < buf.length && buf[i] >= 0x20 && buf[i] <= 0x7E) i++;
             if (i < buf.length && buf[i] === 0x00) {
-              const str = decoder.decode(buf.subarray(start, i));
+              const str = decoder.decode(buf.slice(start, i));
               if (str.length >= minLength) {
-                entries.push({ offset: start, original: str, current: str });
+                strings.push({ offset: start, original: str, current: str });
               }
             }
           }
@@ -78,10 +91,9 @@
         progressBar.textContent = percent + '%';
 
         if (i < buf.length) {
-          setTimeout(processChunk, 0);
+          setTimeout(processChunk, 0); // yield to UI
         } else {
-          progressBar.textContent = 'Done';
-          renderEntries(entries);
+          callback(strings);
         }
       }
 
@@ -90,42 +102,42 @@
 
     function renderEntries(list) {
       stringList.innerHTML = '';
-      const query = searchInput.value.toLowerCase();
-      const filtered = list.filter(e => 
-        e.original.toLowerCase().includes(query) || 
-        e.current.toLowerCase().includes(query)
-      );
-      const fragment = document.createDocumentFragment();
-      filtered.slice(0, 300).forEach((e, idx) => {
+      const frag = document.createDocumentFragment();
+      list.forEach((entry, idx) => {
         const div = document.createElement('div');
         div.className = 'string-item';
+
         const label = document.createElement('label');
-        label.textContent = `[${idx}] Offset 0x${e.offset.toString(16)} | Original: ${e.original}`;
+        label.textContent = `[0x${entry.offset.toString(16)}] Original: "${entry.original}"`;
+
         const input = document.createElement('input');
-        input.value = e.current;
-        input.maxLength = e.original.length;
+        input.type = 'text';
+        input.value = entry.current;
+        input.maxLength = entry.original.length;
+
         input.addEventListener('input', () => {
-          if (input.value.length <= e.original.length) {
-            e.current = input.value;
-          } else {
-            input.value = e.current;
-          }
+          entry.current = input.value;
         });
+
         div.appendChild(label);
         div.appendChild(input);
-        fragment.appendChild(div);
+        frag.appendChild(div);
       });
-      stringList.appendChild(fragment);
+      stringList.appendChild(frag);
     }
 
-    searchInput.addEventListener('input', () => renderEntries(entries));
+    searchInput.addEventListener('input', () => {
+      const q = searchInput.value.toLowerCase();
+      const filtered = entries.filter(e => e.original.toLowerCase().includes(q) || e.current.toLowerCase().includes(q));
+      renderEntries(filtered);
+    });
 
     downloadBtn.addEventListener('click', () => {
-      if (!buffer) return;
+      if (!buffer || entries.length === 0) return;
       const updated = new Uint8Array(buffer);
       entries.forEach(e => {
-        const encoded = new TextEncoder().encode(e.current.padEnd(e.original.length, '\0'));
-        updated.set(encoded.slice(0, e.original.length), e.offset);
+        const enc = new TextEncoder().encode(e.current.padEnd(e.original.length, '\0'));
+        updated.set(enc.slice(0, e.original.length), e.offset);
       });
       const blob = new Blob([updated], { type: 'application/octet-stream' });
       const a = document.createElement('a');
