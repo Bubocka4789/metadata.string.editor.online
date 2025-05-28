@@ -1,189 +1,349 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Metadata String Editor</title>
-  <style>
-    :root{
-      --bg:#f4f4f4;--fg:#111;--accent:#333;--row-even:#f9f9f9;--border:#ddd;
-    }
-    .dark{
-      --bg:#1e1e1e;--fg:#e2e2e2;--accent:#3a3a3a;--row-even:#2a2a2a;--border:#444;
-    }
-    body{margin:0;font-family:system-ui;background:var(--bg);color:var(--fg);}
-    header{display:flex;align-items:center;gap:8px;padding:12px;background:var(--accent);color:#fff;}
-    h1{font-size:1.2rem;margin:0;flex:1 1 auto;}
-    main{padding:12px;}
-    input[type="file"],input[type="text"]{margin-right:8px;}
-    button{padding:6px 12px;margin-right:8px;cursor:pointer;}
-    #tableWrap{height:70vh;overflow:auto;border:1px solid var(--border);}
-    table{width:100%;border-collapse:collapse;}
-    th,td{border:1px solid var(--border);padding:4px 6px;font-size:0.9rem;}
-    th{position:sticky;top:0;background:var(--accent);color:#fff;}
-    tr:nth-child(even){background:var(--row-even);}  
-    input.string-edit{width:100%;box-sizing:border-box;border:none;background:transparent;color:inherit;}
-    input.string-edit:focus{outline:1px solid var(--accent);background:rgba(0,0,0,0.05);}  
-  </style>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Metadata String Editor</title>
+<style>
+  :root {
+    --bg-light: #f0f0f5;
+    --bg-dark: #121212;
+    --text-light: #222;
+    --text-dark: #eee;
+    --accent: #3b82f6;
+    --border: #ccc;
+  }
+  body {
+    margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: var(--bg-light);
+    color: var(--text-light);
+    display: flex; flex-direction: column; height: 100vh;
+  }
+  body.dark {
+    background-color: var(--bg-dark);
+    color: var(--text-dark);
+  }
+  header {
+    padding: 1rem;
+    background: var(--accent);
+    color: white;
+    font-weight: 700;
+    font-size: 1.4rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  #darkToggle {
+    cursor: pointer;
+    background: none;
+    border: 2px solid white;
+    border-radius: 4px;
+    padding: 0.3rem 0.7rem;
+    font-weight: 600;
+  }
+  main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    padding: 1rem;
+    gap: 1rem;
+  }
+  #fileInput {
+    padding: 0.5rem;
+  }
+  #progressContainer {
+    width: 100%;
+    background-color: #ddd;
+    border-radius: 8px;
+    overflow: hidden;
+    height: 16px;
+    display: none;
+  }
+  #progressBar {
+    height: 100%;
+    width: 0%;
+    background-color: var(--accent);
+    transition: width 0.2s ease;
+  }
+  #searchInput {
+    padding: 0.5rem;
+    font-size: 1rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    width: 100%;
+  }
+  #stringList {
+    flex: 1;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background-color: white;
+    color: black;
+    font-family: monospace;
+  }
+  body.dark #stringList {
+    background-color: #222;
+    color: var(--text-dark);
+    border-color: #444;
+  }
+  .stringEntry {
+    padding: 0.3rem 0.6rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+  }
+  body.dark .stringEntry {
+    border-color: #444;
+  }
+  .stringEntry:nth-child(even) {
+    background-color: #f9f9f9;
+  }
+  body.dark .stringEntry:nth-child(even) {
+    background-color: #1a1a1a;
+  }
+  .stringEntry input {
+    font-family: monospace;
+    font-size: 1rem;
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    padding: 0.2rem 0.3rem;
+    width: 100%;
+    background-color: transparent;
+    color: inherit;
+  }
+  .stringIndex {
+    flex-shrink: 0;
+    width: 3rem;
+    text-align: right;
+    margin-right: 0.8rem;
+    user-select: none;
+    color: var(--accent);
+  }
+  .stringText {
+    flex: 1;
+  }
+  footer {
+    padding: 0.5rem 1rem;
+    background: var(--accent);
+    color: white;
+    text-align: center;
+    font-size: 0.9rem;
+  }
+  button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  #saveBtn {
+    margin-top: 1rem;
+    background: var(--accent);
+    border: none;
+    color: white;
+    padding: 0.6rem 1.2rem;
+    font-size: 1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    align-self: flex-start;
+  }
+</style>
 </head>
 <body>
-  <header>
-    <h1>Metadata String Editor</h1>
-    <button id="toggleTheme">🌙 Dark Mode</button>
-  </header>
-  <main>
-    <input type="file" id="fileInput" accept=".dat" />
-    <input type="text" id="searchInput" placeholder="Search…" />
-    <button id="downloadBtn" disabled>Download Modified File</button>
-
-    <div id="tableWrap">
-      <table id="stringTable">
-        <thead>
-          <tr><th style="width:80px">Offset</th><th style="width:40%">Original</th><th>Current</th></tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
-  </main>
+<header>
+  <div>Metadata String Editor</div>
+  <button id="darkToggle">Dark Mode</button>
+</header>
+<main>
+  <input type="file" id="fileInput" accept=".dat" />
+  <div id="progressContainer"><div id="progressBar"></div></div>
+  <input type="text" id="searchInput" placeholder="Search strings..." disabled />
+  <div id="stringList" tabindex="0"></div>
+  <button id="saveBtn" disabled>Save Patched File</button>
+</main>
+<footer>
+  &copy; 2025 Metadata String Editor
+</footer>
 
 <script>
-// ------------------ Theme Toggle ------------------
-const bodyEl=document.body;
-const toggleBtn=document.getElementById('toggleTheme');
-let dark=false;
-function applyTheme(){
-  bodyEl.classList.toggle('dark',dark);
-  toggleBtn.textContent=dark?'☀️ Light Mode':'🌙 Dark Mode';
-}
-toggleBtn.onclick=()=>{
-  dark=!dark;
-  applyTheme();
-};
-applyTheme();
+(() => {
+  const fileInput = document.getElementById('fileInput');
+  const progressContainer = document.getElementById('progressContainer');
+  const progressBar = document.getElementById('progressBar');
+  const searchInput = document.getElementById('searchInput');
+  const stringList = document.getElementById('stringList');
+  const saveBtn = document.getElementById('saveBtn');
+  const darkToggle = document.getElementById('darkToggle');
+  const body = document.body;
 
-// ------------------ State ------------------
-let strings=[];          // full list [{offset,original,current}]
-let filtered=[];         // currently filtered list (search)
-let binary=null;         // Uint8Array of file
-let tableBody=document.querySelector('#stringTable tbody');
-let tableWrap=document.getElementById('tableWrap');
-const ROW_HEIGHT=28;     // px; tweak if needed
+  let binaryData = null;
+  let entries = [];
+  let filteredEntries = [];
 
-// ------------------ Web Worker Setup ------------------
-const workerCode=`self.onmessage=e=>{
-  const buf=e.data;
-  const out=[];
-  const data=new Uint8Array(buf);
-  let i=0;
-  while(i<data.length){
-    const b=data[i];
-    if(b>=0x20&&b<=0x7E){
-      let start=i;
-      while(i<data.length&&data[i]>=0x20&&data[i]<=0x7E)i++;
-      if(data[i]===0x00){
-        const str=new TextDecoder('ascii').decode(data.slice(start,i));
-        out.push([start,str]);
-        i++;
-      }else{
-        i=start+1;
+  const PRINTABLE_RE = /[\x20-\x7E]+\x00/g;
+
+  // Toggle Dark Mode
+  darkToggle.addEventListener('click', () => {
+    body.classList.toggle('dark');
+    darkToggle.textContent = body.classList.contains('dark') ? 'Light Mode' : 'Dark Mode';
+  });
+
+  // Utility to decode ASCII strings from Uint8Array slice
+  function decodeAscii(bytes) {
+    return String.fromCharCode(...bytes);
+  }
+
+  // Load file and parse strings
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+
+    resetUI();
+
+    const reader = new FileReader();
+    reader.onprogress = (e) => {
+      if (e.lengthComputable) {
+        const percent = (e.loaded / e.total) * 100;
+        progressBar.style.width = percent + '%';
+        progressContainer.style.display = 'block';
       }
-    }else{
-      i++;
-    }
-  };
-  postMessage(out);
-}`;
-const blob=new Blob([workerCode],{type:'application/javascript'});
-const worker=new Worker(URL.createObjectURL(blob));
-worker.onmessage=e=>{
-  const arr=e.data;
-  strings=arr.map(([offset,str])=>({offset,original:str,current:str}));
-  document.getElementById('downloadBtn').disabled=false;
-  filterAndRender();
-};
+    };
+    reader.onload = () => {
+      progressBar.style.width = '100%';
+      binaryData = new Uint8Array(reader.result);
 
-// ------------------ File Handling ------------------
-document.getElementById('fileInput').addEventListener('change',e=>{
-  const file=e.target.files[0];
-  if(!file) return;
-  const reader=new FileReader();
-  reader.onload=ev=>{
-    binary=new Uint8Array(ev.target.result);
-    worker.postMessage(ev.target.result,[ev.target.result]);
-  };
-  reader.readAsArrayBuffer(file);
-});
+      entries = [];
+      // Extract all null-terminated printable ASCII strings
+      let match;
+      while ((match = PRINTABLE_RE.exec(new TextDecoder().decode(binaryData))) !== null) {
+        // match.index gives the start index in decoded string, need byte offset
+        // We will find offset by searching byte sequence in binaryData
+        // Because decoded string length = binaryData length (ASCII)
+        const str = match[0].slice(0, -1); // remove trailing \x00
+        const offset = match.index;
+        entries.push({
+          offset,
+          original: str,
+          current: str,
+          length: str.length
+        });
+      }
 
-// ------------------ Search ------------------
-const searchInput=document.getElementById('searchInput');
-searchInput.addEventListener('input',()=>filterAndRender());
-function filterAndRender(){
-  const term=searchInput.value.toLowerCase();
-  filtered=term?strings.filter(s=>s.original.toLowerCase().includes(term)||s.current.toLowerCase().includes(term)):strings;
-  initVirtualTable();
-}
+      if (entries.length === 0) {
+        alert('No strings found in the file.');
+      } else {
+        searchInput.disabled = false;
+        saveBtn.disabled = false;
+      }
 
-// ------------------ Virtual Table Rendering ------------------
-let totalRows=0;
-function initVirtualTable(){
-  totalRows=filtered.length;
-  tableBody.innerHTML='';
-  tableBody.style.position='relative';
-  tableBody.style.height=totalRows*ROW_HEIGHT+'px';
-  renderVisibleRows();
-}
-function renderVisibleRows(){
-  const scrollTop=tableWrap.scrollTop;
-  const viewportHeight=tableWrap.clientHeight;
-  const firstRow=Math.floor(scrollTop/ROW_HEIGHT);
-  const rowsInView=Math.ceil(viewportHeight/ROW_HEIGHT)+5;
-  const start=Math.max(0,firstRow-2);
-  const end=Math.min(totalRows,start+rowsInView);
-  tableBody.innerHTML='';
-  for(let i=start;i<end;i++){
-    const entry=filtered[i];
-    const tr=document.createElement('tr');
-    tr.style.position='absolute';
-    tr.style.top=(i*ROW_HEIGHT)+'px';
+      filteredEntries = [...entries];
+      renderStringList();
+      progressContainer.style.display = 'none';
+    };
+    reader.onerror = () => {
+      alert('Failed to read file.');
+      progressContainer.style.display = 'none';
+    };
 
-    const tdOffset=document.createElement('td');
-    tdOffset.textContent=entry.offset;
-    tr.appendChild(tdOffset);
+    reader.readAsArrayBuffer(file);
+  });
 
-    const tdOrig=document.createElement('td');
-    tdOrig.textContent=entry.original;
-    tr.appendChild(tdOrig);
-
-    const tdCurr=document.createElement('td');
-    const inp=document.createElement('input');
-    inp.className='string-edit';
-    inp.value=entry.current;
-    inp.maxLength=entry.original.length;
-    inp.oninput=ev=>entry.current=ev.target.value;
-    tdCurr.appendChild(inp);
-    tr.appendChild(tdCurr);
-
-    tableBody.appendChild(tr);
+  // Reset UI on new file load
+  function resetUI() {
+    progressBar.style.width = '0%';
+    progressContainer.style.display = 'none';
+    searchInput.value = '';
+    searchInput.disabled = true;
+    stringList.innerHTML = '';
+    saveBtn.disabled = true;
+    entries = [];
+    filteredEntries = [];
   }
-}
-tableWrap.addEventListener('scroll',renderVisibleRows);
 
-// ------------------ Download Patched File ------------------
-document.getElementById('downloadBtn').addEventListener('click',()=>{
-  if(!binary||!strings.length)return;
-  for(const s of strings){
-    if(s.current!==s.original){
-      let bytes=new TextEncoder().encode(s.current);
-      const padLen=s.original.length-bytes.length;
-      const padded=new Uint8Array([...bytes,...new Uint8Array(padLen),0]);
-      binary.set(padded,s.offset);
+  // Render filtered strings in list
+  function renderStringList() {
+    stringList.innerHTML = '';
+    if (filteredEntries.length === 0) {
+      stringList.innerHTML = '<p style="padding:1rem;color:#777;">No matching strings.</p>';
+      return;
+    }
+
+    for (let i = 0; i < filteredEntries.length; i++) {
+      const entry = filteredEntries[i];
+      const div = document.createElement('div');
+      div.className = 'stringEntry';
+      div.dataset.index = entry.offset;
+
+      const idxSpan = document.createElement('span');
+      idxSpan.className = 'stringIndex';
+      idxSpan.textContent = entries.indexOf(entry);
+
+      const input = document.createElement('input');
+      input.className = 'stringText';
+      input.type = 'text';
+      input.value = entry.current;
+      input.maxLength = entry.length;
+      input.spellcheck = false;
+      input.title = `Max length: ${entry.length} chars`;
+
+      input.addEventListener('input', () => {
+        // Validate ASCII printable only
+        if (/^[\x20-\x7E]*$/.test(input.value)) {
+          entry.current = input.value;
+          input.style.borderColor = '';
+        } else {
+          input.style.borderColor = 'red';
+        }
+      });
+
+      div.appendChild(idxSpan);
+      div.appendChild(input);
+      stringList.appendChild(div);
     }
   }
-  const blob=new Blob([binary],{type:'application/octet-stream'});
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download='patched_global_metadata.dat';
-  a.click();
-});
+
+  // Search filter logic (case-insensitive, substring)
+  searchInput.addEventListener('input', () => {
+    const term = searchInput.value.toLowerCase();
+    filteredEntries = entries.filter(e =>
+      e.original.toLowerCase().includes(term) ||
+      e.current.toLowerCase().includes(term)
+    );
+    renderStringList();
+  });
+
+  // Save patched file
+  saveBtn.addEventListener('click', () => {
+    if (!binaryData || entries.length === 0) return;
+
+    const patched = new Uint8Array(binaryData);
+
+    for (const entry of entries) {
+      if (entry.current !== entry.original) {
+        const bytes = new TextEncoder().encode(entry.current);
+        const padded = new Uint8Array(entry.length);
+        padded.fill(0);
+        padded.set(bytes);
+        patched.set(padded, entry.offset);
+      }
+    }
+
+    // Create blob and trigger download
+    const blob = new Blob([patched], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'patched_metadata.dat';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 0);
+  });
+
+  // Initialize dark mode text
+  darkToggle.textContent = 'Dark Mode';
+})();
 </script>
 </body>
 </html>
