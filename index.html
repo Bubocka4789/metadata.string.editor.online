@@ -82,6 +82,10 @@
 
   let allEntries = [];
 
+  function isPrintableAscii(byte) {
+    return byte >= 0x20 && byte <= 0x7E;
+  }
+
   fileInput.addEventListener('change', () => {
     const file = fileInput.files[0];
     if (!file) return;
@@ -97,23 +101,29 @@
     file.arrayBuffer().then(buffer => {
       const bytes = new Uint8Array(buffer);
       const decoder = new TextDecoder('ascii');
-      const chunkSize = 64 * 1024; // 64KB chunks
+      const chunkSize = 64 * 1024; // 64 KB chunks
       let offset = 0;
+      let lastPercent = 0;
 
       function processChunk() {
         const end = Math.min(offset + chunkSize, bytes.length);
         let i = offset;
 
         while (i < end) {
-          if (bytes[i] >= 0x20 && bytes[i] <= 0x7E) {
+          if (isPrintableAscii(bytes[i])) {
             const start = i;
-            while (i < bytes.length && bytes[i] >= 0x20 && bytes[i] <= 0x7E) i++;
+            while (i < bytes.length && isPrintableAscii(bytes[i])) {
+              i++;
+              if (i >= bytes.length) break;
+            }
             if (i < bytes.length && bytes[i] === 0x00) {
               const str = decoder.decode(bytes.subarray(start, i));
               if (str.length >= 3) {
                 allEntries.push({ offset: start, original: str, current: str });
               }
               i++;
+            } else {
+              i = start + 1;
             }
           } else {
             i++;
@@ -122,8 +132,11 @@
 
         offset = end;
         const percent = Math.floor((offset / bytes.length) * 100);
-        progressBar.style.width = percent + '%';
-        progressBar.textContent = percent + '%';
+        if (percent >= lastPercent + 5 || percent === 100) {
+          progressBar.style.width = percent + '%';
+          progressBar.textContent = percent + '%';
+          lastPercent = percent;
+        }
 
         if (offset < bytes.length) {
           setTimeout(processChunk, 0);
