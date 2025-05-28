@@ -3,83 +3,74 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>IL2CCP Metadata String Editor</title>
+<title>Metadata String Editor</title>
 <style>
   body {
     font-family: monospace;
     background: #121212;
-    color: #ddd;
-    margin: 1rem;
+    color: #eee;
+    padding: 1rem;
+    margin: 0;
   }
-  h1 {
-    text-align: center;
-  }
-  #file-input {
-    display: block;
-    margin: 1rem auto;
+  #file-input, #search-input {
+    width: 100%;
+    box-sizing: border-box;
+    margin-bottom: 0.5rem;
+    font-size: 1rem;
+    padding: 0.4rem;
   }
   #progress-container {
     width: 100%;
     background: #333;
-    border-radius: 8px;
-    overflow: hidden;
-    margin-bottom: 1rem;
     height: 20px;
+    margin-bottom: 0.5rem;
     display: none;
+    border-radius: 5px;
+    overflow: hidden;
   }
   #progress-bar {
     height: 100%;
-    width: 0;
+    width: 0%;
     background: #4caf50;
-    color: white;
     text-align: center;
-    font-size: 12px;
+    color: white;
+    font-size: 0.9rem;
     line-height: 20px;
     user-select: none;
-  }
-  #search-input {
-    width: 100%;
-    padding: 8px;
-    font-size: 16px;
-    margin-bottom: 1rem;
-    border-radius: 5px;
-    border: none;
   }
   #string-list {
     max-height: 70vh;
     overflow-y: auto;
     border: 1px solid #555;
-    padding: 8px;
+    padding: 0.5rem;
     border-radius: 5px;
     background: #222;
   }
   .string-item {
-    margin-bottom: 10px;
+    margin-bottom: 0.5rem;
   }
   .string-item label {
-    display: block;
     color: #90caf9;
-    font-size: 0.8rem;
-    margin-bottom: 2px;
+    font-size: 0.85rem;
+    display: block;
   }
   .string-item input {
     width: 100%;
     font-family: monospace;
-    font-size: 14px;
+    font-size: 1rem;
     background: #333;
     border: 1px solid #555;
     border-radius: 4px;
     color: #eee;
-    padding: 4px 6px;
+    padding: 0.25rem 0.4rem;
   }
 </style>
 </head>
 <body>
 
-<h1>IL2CCP Metadata String Editor</h1>
 <input type="file" id="file-input" accept=".dat" />
 <div id="progress-container"><div id="progress-bar">0%</div></div>
-<input type="text" id="search-input" placeholder="Search strings..." />
+<input type="text" id="search-input" placeholder="Search strings..." disabled />
 <div id="string-list"></div>
 
 <script>
@@ -97,22 +88,24 @@
 
     allEntries = [];
     stringList.innerHTML = '';
+    searchInput.value = '';
+    searchInput.disabled = true;
     progressBar.style.width = '0%';
     progressBar.textContent = '0%';
     progressContainer.style.display = 'block';
-    searchInput.value = '';
 
     file.arrayBuffer().then(buffer => {
       const bytes = new Uint8Array(buffer);
       const decoder = new TextDecoder('ascii');
-      const chunkSize = 64 * 1024; // 64 KB chunks
+      const chunkSize = 64 * 1024; // 64KB chunks
       let offset = 0;
 
       function processChunk() {
         const end = Math.min(offset + chunkSize, bytes.length);
         let i = offset;
+
         while (i < end) {
-          if (bytes[i] >= 0x20 && bytes[i] <= 0x7E) { // printable ASCII range
+          if (bytes[i] >= 0x20 && bytes[i] <= 0x7E) {
             const start = i;
             while (i < bytes.length && bytes[i] >= 0x20 && bytes[i] <= 0x7E) i++;
             if (i < bytes.length && bytes[i] === 0x00) {
@@ -126,20 +119,23 @@
             i++;
           }
         }
+
         offset = end;
         const percent = Math.floor((offset / bytes.length) * 100);
         progressBar.style.width = percent + '%';
         progressBar.textContent = percent + '%';
 
         if (offset < bytes.length) {
-          setTimeout(processChunk, 0); // Yield to UI thread to avoid freezing
+          setTimeout(processChunk, 0);
         } else {
           progressBar.style.width = '100%';
           progressBar.textContent = 'Done';
-          setTimeout(() => progressContainer.style.display = 'none', 500);
+          setTimeout(() => (progressContainer.style.display = 'none'), 400);
           renderEntries(allEntries);
+          searchInput.disabled = false;
         }
       }
+
       processChunk();
     });
   });
@@ -161,7 +157,7 @@
         if (input.value.length <= entry.original.length) {
           entry.current = input.value;
         } else {
-          input.value = entry.current; // revert if too long
+          input.value = entry.current;
         }
       });
 
