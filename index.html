@@ -1,411 +1,169 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Virtualized Global Metadata String Editor</title>
-<style>
-  body {
-    background: #121212; color: #eee; font-family: monospace; margin: 0; padding: 1rem;
-    height: 100vh; display: flex; flex-direction: column;
-  }
-  #topbar {
-    display: flex; gap: 1rem; margin-bottom: 1rem; align-items: center;
-  }
-  input[type="file"], input[type="text"], button {
-    background: #222; border: none; padding: 0.5rem; color: #eee; border-radius: 4px;
-    font-family: monospace; font-size: 1rem;
-  }
-  input[type="text"] {
-    flex: 1;
-  }
-  button {
-    cursor: pointer;
-  }
-  button:disabled {
-    background: #555; cursor: default;
-  }
-  #progress-container {
-    width: 100%; height: 22px; background: #333; border-radius: 11px; overflow: hidden;
-    margin-bottom: 1rem;
-  }
-  #progress-bar {
-    height: 100%; width: 0%; background: #4caf50; transition: width 0.15s ease;
-    display: flex; align-items: center; justify-content: center; font-size: 0.9rem;
-    color: #121212; font-weight: bold; user-select: none;
-  }
-  #string-list-container {
-    flex: 1;
-    position: relative;
-    border: 1px solid #444;
-    border-radius: 6px;
-    overflow-y: auto;
-    background: #1e1e1e;
-    font-size: 14px;
-  }
-  #string-list {
-    position: relative;
-    width: 100%;
-  }
-  .string-item {
-    box-sizing: border-box;
-    display: flex;
-    gap: 1rem;
-    padding: 0.3rem 0.5rem;
-    border-bottom: 1px solid #333;
-    background: #222;
-    color: #eee;
-    position: absolute;
-    width: 100%;
-    left: 0;
-    height: 32px;
-    align-items: center;
-  }
-  .string-col {
-    flex: 1 1 45%;
-    display: flex;
-    flex-direction: column;
-  }
-  label {
-    font-size: 0.65rem;
-    color: #bbb;
-    user-select: none;
-  }
-  input.string-input {
-    background: #000;
-    border: 1px solid #555;
-    border-radius: 4px;
-    color: #eee;
-    padding: 0.1rem 0.3rem;
-    font-family: monospace;
-    font-size: 1rem;
-    width: 100%;
-    box-sizing: border-box;
-  }
-  input[readonly] {
-    background: #222;
-    color: #777;
-    cursor: default;
-  }
-  #status-text {
-    margin-top: 0.5rem;
-    font-size: 0.9rem;
-    color: #888;
-    user-select: none;
-  }
-</style>
+  <meta charset="UTF-8" />
+  <title>global-metadata.dat Editor</title>
+  <style>
+    body { font-family: sans-serif; margin: 0; padding: 0; }
+    #container { display: flex; flex-direction: column; height: 100vh; }
+    #controls { padding: 10px; background: #f4f4f4; display: flex; align-items: center; gap: 10px; }
+    #progress { flex: 1; }
+    #tableContainer { overflow-y: scroll; flex: 1; font-family: monospace; }
+    table { border-collapse: collapse; width: 100%; }
+    td, th { border: 1px solid #ccc; padding: 4px; white-space: pre; }
+    input[type="text"] { width: 100%; }
+  </style>
 </head>
 <body>
-
-<div id="topbar">
-  <input type="file" id="file-input" accept=".dat" />
-  <input type="text" id="search" placeholder="Case-sensitive search" disabled />
-  <button id="download-btn" disabled>Download</button>
+<div id="container">
+  <div id="controls">
+    <input type="file" id="fileInput" />
+    <input type="text" id="searchInput" placeholder="Search (case-sensitive)" />
+    <progress id="progress" max="100" value="0"></progress>
+    <button id="saveBtn">Save</button>
+  </div>
+  <div id="tableContainer">
+    <table id="stringTable">
+      <thead><tr><th>Offset</th><th>Original</th><th>Modified</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
 </div>
-
-<div id="progress-container" aria-label="Progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" style="display:none;">
-  <div id="progress-bar">0%</div>
-</div>
-
-<div id="string-list-container" tabindex="0" aria-live="polite" aria-relevant="additions">
-  <div id="string-list"></div>
-</div>
-
-<div id="status-text">Load a .dat file to start.</div>
 
 <script>
-(() => {
-  const fileInput = document.getElementById('file-input');
-  const progressBar = document.getElementById('progress-bar');
-  const progressContainer = document.getElementById('progress-container');
-  const stringListContainer = document.getElementById('string-list-container');
-  const stringList = document.getElementById('string-list');
-  const searchInput = document.getElementById('search');
-  const downloadBtn = document.getElementById('download-btn');
-  const statusText = document.getElementById('status-text');
+let originalBuffer, stringEntries = [], modifiedStrings = {};
 
-  let buffer = null;
-  let entries = [];
-  let filteredEntries = [];
+const readString = (dataView, offset, length) => {
+  const bytes = new Uint8Array(dataView.buffer, offset, length);
+  return new TextDecoder('utf-8').decode(bytes);
+};
 
-  const textDecoder = new TextDecoder('ascii');
-  const textEncoder = new TextEncoder();
+document.getElementById('fileInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
 
-  const MIN_STRING_LEN = 3;
-  const ITEM_HEIGHT = 32; // px height of one string item row
+  const arrayBuffer = await file.arrayBuffer();
+  originalBuffer = arrayBuffer;
 
-  // requestIdleCallback fallback
-  const idleCallback = window.requestIdleCallback || function(fn) { return setTimeout(fn, 50); };
+  const dataView = new DataView(arrayBuffer);
+  const length = arrayBuffer.byteLength;
+  const printable = /[ -~]/; // ASCII printable (includes space)
+  let strings = [], offset = 0, str = '';
 
-  // Debounce utility
-  function debounce(fn, delay) {
-    let timer;
-    return (...args) => {
-      clearTimeout(timer);
-      timer = setTimeout(() => fn(...args), delay);
-    };
-  }
+  const addString = (str, startOffset) => {
+    if (str.length >= 4) {
+      strings.push({ offset: startOffset, original: str });
+    }
+  };
 
-  // Progress bar update
-  function updateProgress(percent) {
-    progressBar.style.width = percent + '%';
-    progressBar.textContent = percent + '%';
-    progressContainer.setAttribute('aria-valuenow', percent);
-  }
+  const batchSize = 100;
+  let currentOffset = 0;
 
-  // Status update
-  function updateStatus(text) {
-    statusText.textContent = text;
-  }
+  const processChunk = () => {
+    const start = currentOffset;
+    let added = 0;
 
-  // Incremental string extraction (ASCII printable sequences)
-  function incrementalExtractStrings(buf) {
-    entries = [];
-    filteredEntries = [];
-    progressContainer.style.display = 'block';
-    updateProgress(0);
-    updateStatus('Extracting strings...');
-    searchInput.disabled = true;
-    downloadBtn.disabled = true;
+    while (currentOffset < length) {
+      const byte = dataView.getUint8(currentOffset);
+      const char = String.fromCharCode(byte);
 
-    const len = buf.length;
-    let pos = 0;
-    let idCounter = 0;
-
-    function extractChunk(deadline) {
-      while ((deadline.timeRemaining() > 0 || deadline.didTimeout) && pos < len) {
-        if (buf[pos] >= 0x20 && buf[pos] <= 0x7E) {
-          const start = pos;
-          while (pos < len && buf[pos] >= 0x20 && buf[pos] <= 0x7E) pos++;
-          const strLen = pos - start;
-          if (strLen >= MIN_STRING_LEN) {
-            const str = textDecoder.decode(buf.slice(start, pos));
-            entries.push({ id: idCounter++, offset: start, original: str, modified: str });
-          }
-        } else {
-          pos++;
-        }
-      }
-      updateProgress(Math.floor((pos / len) * 100));
-      if (pos < len) {
-        idleCallback(extractChunk, { timeout: 50 });
+      if (printable.test(char)) {
+        if (str === '') offset = currentOffset;
+        str += char;
       } else {
-        updateProgress(100);
-        progressContainer.style.display = 'none';
-        updateStatus(`Extraction complete. ${entries.length} strings found.`);
-        filteredEntries = entries;
-        searchInput.disabled = false;
-        downloadBtn.disabled = false;
-        resetVirtualList();
+        if (str.length >= 4) {
+          addString(str, offset);
+          added++;
+          if (added >= batchSize) break;
+        }
+        str = '';
       }
+
+      currentOffset++;
     }
 
-    idleCallback(extractChunk, { timeout: 50 });
-  }
+    document.getElementById('progress').value = Math.floor((currentOffset / length) * 100);
 
-  // Search filtering
-  function filterEntries(query) {
-    if (!query) return entries;
-    return entries.filter(e => e.original.includes(query) || e.modified.includes(query));
-  }
+    if (currentOffset >= length) {
+      populateTable(strings);
+    } else {
+      setTimeout(processChunk, 0); // avoid blocking UI
+    }
+  };
 
-  // Virtual list state
-  let scrollTop = 0;
-  let viewportHeight = 0;
-  let visibleStartIndex = 0;
-  let visibleEndIndex = 0;
-  let pool = []; // DOM elements pool for reuse
+  processChunk();
+});
 
-  // Create one string item element (reusable)
-  function createStringItem() {
-    const div = document.createElement('div');
-    div.className = 'string-item';
+function populateTable(strings) {
+  const tbody = document.querySelector('#stringTable tbody');
+  tbody.innerHTML = '';
+  stringEntries = strings;
 
-    const colOrig = document.createElement('div');
-    colOrig.className = 'string-col';
-    const labelOrig = document.createElement('label');
-    labelOrig.textContent = 'Offset';
-    const inputOrig = document.createElement('input');
-    inputOrig.type = 'text';
-    inputOrig.readOnly = true;
-    inputOrig.className = 'string-input';
-    colOrig.appendChild(labelOrig);
-    colOrig.appendChild(inputOrig);
-
-    const colOriginalStr = document.createElement('div');
-    colOriginalStr.className = 'string-col';
-    const labelOriginalStr = document.createElement('label');
-    labelOriginalStr.textContent = 'Original String';
-    const inputOriginalStr = document.createElement('input');
-    inputOriginalStr.type = 'text';
-    inputOriginalStr.readOnly = true;
-    inputOriginalStr.className = 'string-input';
-    colOriginalStr.appendChild(labelOriginalStr);
-    colOriginalStr.appendChild(inputOriginalStr);
-
-    const colModifiedStr = document.createElement('div');
-    colModifiedStr.className = 'string-col';
-    const labelModifiedStr = document.createElement('label');
-    labelModifiedStr.textContent = 'Modified String';
-    const inputModifiedStr = document.createElement('input');
-    inputModifiedStr.type = 'text';
-    inputModifiedStr.className = 'string-input';
-    colModifiedStr.appendChild(labelModifiedStr);
-    colModifiedStr.appendChild(inputModifiedStr);
-
-    div.appendChild(colOrig);
-    div.appendChild(colOriginalStr);
-    div.appendChild(colModifiedStr);
-
-    // Events
-    inputModifiedStr.addEventListener('input', e => {
-      const idx = div._virtualIndex;
-      if (idx == null) return;
-      const entry = filteredEntries[idx];
-      if (!entry) return;
-
-      entry.modified = e.target.value;
+  for (const { offset, original } of strings) {
+    const row = document.createElement('tr');
+    const offsetCell = document.createElement('td');
+    offsetCell.textContent = `0x${offset.toString(16)}`;
+    const originalCell = document.createElement('td');
+    originalCell.textContent = original;
+    const modifiedCell = document.createElement('td');
+    const input = document.createElement('input');
+    input.value = original;
+    input.dataset.offset = offset;
+    input.addEventListener('input', () => {
+      modifiedStrings[offset] = input.value;
     });
-
-    return div;
+    modifiedCell.appendChild(input);
+    row.append(offsetCell, originalCell, modifiedCell);
+    tbody.appendChild(row);
   }
+}
 
-  // Initialize pool with fixed number of elements
-  function initPool(size) {
-    pool.forEach(elem => elem.remove());
-    pool = [];
-    for (let i = 0; i < size; i++) {
-      const item = createStringItem();
-      stringList.appendChild(item);
-      pool.push(item);
-    }
-  }
+document.getElementById('searchInput').addEventListener('input', (e) => {
+  const term = e.target.value;
+  const rows = document.querySelectorAll('#stringTable tbody tr');
+  rows.forEach(row => {
+    const original = row.cells[1].textContent;
+    const modified = row.cells[2].firstChild.value;
+    row.style.display = (original.includes(term) || modified.includes(term)) ? '' : 'none';
+  });
+});
 
-  // Reset virtual list on new data or filter change
-  function resetVirtualList() {
-    // Set stringList container height to total height to enable scrolling
-    stringList.style.height = (filteredEntries.length * ITEM_HEIGHT) + 'px';
+document.getElementById('saveBtn').addEventListener('click', () => {
+  const view = new Uint8Array(originalBuffer);
+  const encoder = new TextEncoder();
+  let appendedData = [];
 
-    viewportHeight = stringListContainer.clientHeight;
-    const visibleCount = Math.min(filteredEntries.length, Math.ceil(viewportHeight / ITEM_HEIGHT) + 5);
+  for (const entry of stringEntries) {
+    const { offset, original } = entry;
+    const modified = modifiedStrings[offset];
 
-    initPool(visibleCount);
-    renderVisibleItems();
-  }
-
-  // Render visible items based on scrollTop
-  function renderVisibleItems() {
-    scrollTop = stringListContainer.scrollTop;
-    visibleStartIndex = Math.floor(scrollTop / ITEM_HEIGHT);
-    const visibleCount = pool.length;
-    visibleEndIndex = Math.min(visibleStartIndex + visibleCount, filteredEntries.length);
-
-    for (let i = 0; i < pool.length; i++) {
-      const item = pool[i];
-      const entryIndex = visibleStartIndex + i;
-      if (entryIndex >= filteredEntries.length) {
-        item.style.display = 'none';
-        item._virtualIndex = null;
-        continue;
-      }
-      const entry = filteredEntries[entryIndex];
-      item.style.display = 'flex';
-      item.style.top = (entryIndex * ITEM_HEIGHT) + 'px';
-      item._virtualIndex = entryIndex;
-
-      const inputs = item.querySelectorAll('input.string-input');
-      // offset input (readonly)
-      inputs[0].value = entry.offset;
-
-      // original string (readonly)
-      inputs[1].value = entry.original;
-
-      // modified string (editable)
-      if (inputs[2].value !== entry.modified) {
-        inputs[2].value = entry.modified;
+    if (modified && modified !== original) {
+      const encoded = encoder.encode(modified);
+      if (encoded.length <= original.length) {
+        // In-place overwrite
+        view.set(encoded, offset);
+        for (let i = offset + encoded.length; i < offset + original.length; i++) {
+          view[i] = 0x20; // pad with space
+        }
+      } else {
+        // Append to end
+        const newOffset = view.length + appendedData.length;
+        appendedData.push(...encoded);
+        // TODO: Update offset in header if needed
       }
     }
   }
 
-  // Scroll handler
-  stringListContainer.addEventListener('scroll', () => {
-    requestAnimationFrame(renderVisibleItems);
-  });
+  const finalArray = new Uint8Array(view.length + appendedData.length);
+  finalArray.set(view);
+  finalArray.set(new Uint8Array(appendedData), view.length);
 
-  // Search input handler with debounce
-  const onSearchInput = debounce(() => {
-    const query = searchInput.value;
-    filteredEntries = filterEntries(query);
-    resetVirtualList();
-  }, 250);
-
-  searchInput.addEventListener('input', onSearchInput);
-
-  // File load handler
-  fileInput.addEventListener('change', () => {
-    if (fileInput.files.length === 0) return;
-    const file = fileInput.files[0];
-    const reader = new FileReader();
-
-    searchInput.disabled = true;
-    downloadBtn.disabled = true;
-    progressContainer.style.display = 'block';
-    updateProgress(0);
-    updateStatus('Reading file...');
-
-    reader.onload = () => {
-      buffer = new Uint8Array(reader.result);
-      incrementalExtractStrings(buffer);
-    };
-    reader.onerror = () => {
-      updateStatus('Error reading file.');
-      progressContainer.style.display = 'none';
-    };
-    reader.readAsArrayBuffer(file);
-  });
-
-  // Download patched file with modified strings replaced
-  downloadBtn.addEventListener('click', () => {
-    if (!buffer) return;
-    updateStatus('Patching file...');
-    const patched = new Uint8Array(buffer);
-
-    filteredEntries.forEach(e => {
-      const modStr = e.modified;
-      // If shorter, pad with \0, if longer, truncate
-      let modEncoded = textEncoder.encode(modStr);
-      if (modEncoded.length < e.original.length) {
-        const padding = new Uint8Array(e.original.length - modEncoded.length);
-        modEncoded = new Uint8Array([...modEncoded, ...padding]);
-      } else if (modEncoded.length > e.original.length) {
-        modEncoded = modEncoded.slice(0, e.original.length);
-      }
-      patched.set(modEncoded, e.offset);
-    });
-
-    const blob = new Blob([patched], { type: 'application/octet-stream' });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'patched-global-metadata.dat';
-    a.click();
-
-    URL.revokeObjectURL(url);
-    updateStatus('Download complete.');
-  });
-
-  // Init UI
-  searchInput.disabled = true;
-  downloadBtn.disabled = true;
-  updateStatus('Load a .dat file to start.');
-
-  // Resize observer for container height changes
-  new ResizeObserver(() => {
-    if (filteredEntries.length) resetVirtualList();
-  }).observe(stringListContainer);
-})();
+  const blob = new Blob([finalArray], { type: 'application/octet-stream' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'global-metadata-modified.dat';
+  a.click();
+});
 </script>
-
 </body>
 </html>
