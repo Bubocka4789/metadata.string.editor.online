@@ -178,14 +178,13 @@
       const reader = new FileReader();
       reader.onload = () => {
         buffer = new Uint8Array(reader.result);
-        extractStringsIncremental(buffer, (allStrings) => {
-          entries = allStrings;
-          filteredEntries = null;
-          renderEntries(entries);
+        entries = [];
+        stringList.innerHTML = '';
+        extractStringsLive(buffer, () => {
           updateProgress(100);
           setTimeout(() => {
             progressContainer.style.display = 'none';
-          }, 400);
+          }, 500);
         });
       };
       reader.readAsArrayBuffer(file);
@@ -197,30 +196,34 @@
       progressContainer.setAttribute('aria-valuenow', percent);
     }
 
-    // Incremental string extractor with batch UI updates to avoid freeze
-    function extractStringsIncremental(buf, callback) {
-      const strings = [];
+    // Live incremental extraction with immediate UI updates and yielding
+    function extractStringsLive(buf, doneCallback) {
       const minLength = 3;
       const decoder = new TextDecoder('ascii');
       let i = 0;
-      const chunkSize = 50000;  // bytes per chunk processed
-      const batchSize = 50;     // number of new strings per batch rendered
+      const maxDisplay = 100;
 
-      function processChunk() {
-        const end = Math.min(i + chunkSize, buf.length);
+      function nextChunk() {
+        let stringsFoundThisTick = 0;
 
-        while (i < end) {
+        while (i < buf.length) {
           if (buf[i] >= 0x20 && buf[i] <= 0x7E) {
             const start = i;
             while (i < buf.length && buf[i] >= 0x20 && buf[i] <= 0x7E) i++;
-
             if (i === buf.length || buf[i] === 0x00) {
               const str = decoder.decode(buf.slice(start, i));
               if (str.length >= minLength) {
-                strings.push({ offset: start, original: str, current: str });
-                if (strings.length % batchSize === 0) {
-                  renderEntries(strings); // render batch of strings found so far
+                const entry = { offset: start, original: str, current: str };
+                entries.push(entry);
+                if (!filteredEntries) {
+                  if (entries.length <= maxDisplay) {
+                    appendEntryToDOM(entry);
+                  } else if (entries.length === maxDisplay + 1) {
+                    moreInfo.textContent = `Showing first ${maxDisplay} strings. Use search to filter more.`;
+                  }
                 }
+                stringsFoundThisTick++;
+                if (stringsFoundThisTick >= 10) break; // yield after 10 strings
               }
               if (i < buf.length && buf[i] === 0x00) i++;
             }
@@ -232,31 +235,77 @@
         updateProgress(Math.floor((i / buf.length) * 100));
 
         if (i < buf.length) {
-          setTimeout(processChunk, 0);
+          // yield to keep UI responsive
+          setTimeout(nextChunk, 0);
         } else {
-          callback(strings);
+          doneCallback();
         }
       }
-
-      processChunk();
+      nextChunk();
     }
 
+    // Append one entry to DOM (used during live extraction)
+    function appendEntryToDOM(entry) {
+      const div = document.createElement('div');
+      div.className = 'string-item';
+
+      const label = document.createElement('div');
+      label.className = 'string-label';
+      label.textContent = `[0x${entry.offset.toString(16).toUpperCase().padStart(8, '0')}]`;
+
+      const originalCol = document.createElement('div');
+      originalCol.className = 'string-col';
+      const originalLabel = document.createElement('label');
+      originalLabel.textContent = 'Original';
+      const originalInput = document.createElement('input');
+      originalInput.type = 'text';
+      originalInput.value = entry.original;
+      originalInput.readOnly = true;
+      originalInput.setAttribute('aria-label', `Original string at offset 0x${entry.offset.toString(16)}`);
+      originalCol.appendChild(originalLabel);
+      originalCol.appendChild(originalInput);
+
+      const modifiedCol = document.createElement('div');
+      modifiedCol.className = 'string-col';
+      const modifiedLabel = document.createElement('label');
+      modifiedLabel.textContent = 'Modified';
+      const modifiedInput = document.createElement('input');
+      modifiedInput.type = 'text';
+      modifiedInput.value = entry.current;
+      modifiedInput.maxLength = entry.original.length;
+      modifiedInput.setAttribute('aria-label', `Modified string at offset 0x${entry.offset.toString(16)}`);
+
+      modifiedInput.addEventListener('input', () => {
+        let filtered = modifiedInput.value.replace(/[^\x20-\x7E]/g, '');
+        if (filtered.length > entry.original.length) {
+          filtered = filtered.slice(0, entry.original.length);
+        }
+        modifiedInput.value = filtered;
+        entry.current = filtered;
+      });
+
+      modifiedCol.appendChild(modifiedLabel);
+      modifiedCol.appendChild(modifiedInput);
+
+      div.appendChild(label);
+      div.appendChild(originalCol);
+      div.appendChild(modifiedCol);
+
+      stringList.appendChild(div);
+    }
+
+    // Renders entries (used for filtered results)
     function renderEntries(list) {
-      // Decide which list to render (filtered or full)
-      const toRender = filteredEntries || list;
-
       stringList.innerHTML = '';
-
-      if (toRender.length === 0) {
+      if (list.length === 0) {
         stringList.textContent = 'No strings found.';
         moreInfo.textContent = '';
         return;
       }
-
+      const maxRender = 100;
       const fragment = document.createDocumentFragment();
-      const maxRender = 100;  // limit number of rendered inputs
 
-      toRender.slice(0, maxRender).forEach((entry) => {
+      list.slice(0, maxRender).forEach((entry) => {
         const div = document.createElement('div');
         div.className = 'string-item';
 
@@ -307,8 +356,8 @@
 
       stringList.appendChild(fragment);
 
-      if (toRender.length > maxRender) {
-        moreInfo.textContent = `Showing first ${maxRender} of ${toRender.length} strings. Use search to filter.`;
+      if (list.length > maxRender) {
+        moreInfo.textContent = `Showing first ${maxRender} of ${list.length} strings. Use search to filter.`;
       } else {
         moreInfo.textContent = '';
       }
@@ -318,7 +367,14 @@
       const query = searchInput.value.trim().toLowerCase();
       if (!query) {
         filteredEntries = null;
-        renderEntries(entries);
+        // Show first 100 entries only
+        stringList.innerHTML = '';
+        entries.slice(0, 100).forEach(appendEntryToDOM);
+        if (entries.length > 100) {
+          moreInfo.textContent = `Showing first 100 strings. Use search to filter more.`;
+        } else {
+          moreInfo.textContent = '';
+        }
         return;
       }
       filteredEntries = entries.filter(e =>
