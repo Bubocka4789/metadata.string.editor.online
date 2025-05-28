@@ -1,254 +1,133 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>IL2CPP Metadata String Editor</title>
-<style>
-  body {
-    margin: 0; padding: 1rem;
-    background: #121212; color: #e0e0e0;
-    font-family: system-ui, monospace;
-  }
-  h1 {
-    text-align: center;
-    margin-bottom: 1rem;
-  }
-  #controls {
-    max-width: 600px;
-    margin: 0 auto 1rem auto;
-    display: flex;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-    justify-content: center;
-  }
-  button, input[type="text"] {
-    background: #222;
-    color: #eee;
-    border: 1px solid #555;
-    border-radius: 4px;
-    padding: 0.5rem 1rem;
-    font-size: 1rem;
-  }
-  button:hover {
-    background: #444;
-    cursor: pointer;
-  }
-  #progress-container {
-    max-width: 600px;
-    margin: 0 auto 1rem auto;
-    background: #333;
-    border-radius: 8px;
-    overflow: hidden;
-    height: 24px;
-    display: none;
-  }
-  #progress-bar {
-    height: 100%;
-    width: 0%;
-    background: #4caf50;
-    color: white;
-    font-weight: 600;
-    font-size: 0.9rem;
-    text-align: center;
-    line-height: 24px;
-    user-select: none;
-  }
-  #string-list {
-    max-width: 600px;
-    margin: 0 auto;
-    max-height: 60vh;
-    overflow-y: auto;
-    border: 1px solid #444;
-    border-radius: 6px;
-    background: #1e1e1e;
-    padding: 0.5rem;
-    display: grid;
-    grid-template-columns: 120px 1fr 1fr;
-    gap: 0.5rem;
-    font-size: 0.9rem;
-  }
-  .string-label {
-    color: #90caf9;
-    user-select: text;
-    align-self: center;
-  }
-  .string-original {
-    background: #000;
-    color: #999;
-    border: 1px solid #444;
-    border-radius: 4px;
-    padding: 0.25rem 0.5rem;
-    overflow-wrap: break-word;
-    user-select: text;
-  }
-  .string-input {
-    background: #000;
-    color: #eee;
-    border: 1px solid #555;
-    border-radius: 4px;
-    padding: 0.25rem 0.5rem;
-    font-family: monospace;
-  }
-  #pagination {
-    max-width: 600px;
-    margin: 0.5rem auto;
-    text-align: center;
-    color: #ccc;
-  }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Metadata String Editor</title>
+  <style>
+    body { margin: 0; font-family: system-ui; background: #121212; color: #e0e0e0; padding: 1rem; }
+    h1 { text-align: center; }
+    #controls { display: flex; gap: 1rem; margin-bottom: 1rem; justify-content: center; flex-wrap: wrap; }
+    #progress-container { display: none; background: #333; border-radius: 8px; overflow: hidden; width: 100%; max-width: 600px; margin: 0 auto; }
+    #progress-bar { height: 20px; width: 0%; background: #4caf50; text-align: center; color: #fff; font-weight: 600; font-size: .8rem; }
+    #search { padding: .4rem; width: 100%; max-width: 400px; background: #000; border: 1px solid #555; color: #eee; border-radius: 4px; }
+    #string-list { margin-top: 1rem; max-height: 60vh; overflow: auto; border: 1px solid #444; border-radius: 6px; padding: .5rem; }
+    .string-item { margin-bottom: .5rem; background: #1e1e1e; padding: .5rem; border-radius: 4px; }
+    .string-item label { font-size: .85rem; color: #90caf9; display: block; margin-bottom: .2rem; }
+    .string-item input[type="text"] { width: 100%; padding: .4rem; background: #000; color: #eee; border: 1px solid #555; border-radius: 4px; font-family: monospace; }
+    button { background: #333; color: #fff; border: none; padding: .5rem 1rem; border-radius: 4px; cursor: pointer; }
+    button:hover { background: #555; }
+  </style>
 </head>
 <body>
-<h1>IL2CPP Metadata String Editor</h1>
-
-<div id="controls">
-  <input type="file" id="file-input" accept=".dat" />
-  <button id="cancel-button" style="display:none;">Cancel Loading</button>
-  <button id="download-button" disabled>Download Modified</button>
-  <input type="text" id="search-input" placeholder="Search strings..." style="flex-grow:1; max-width:300px;" disabled />
-</div>
-
-<div id="progress-container"><div id="progress-bar">0%</div></div>
-
-<div id="string-list"></div>
-<div id="pagination"></div>
+  <h1>Metadata String Editor</h1>
+  <div id="controls">
+    <input type="file" id="file-input" accept=".dat">
+    <input type="text" id="search" placeholder="Search...">
+    <button id="download-btn">Download</button>
+  </div>
+  <div id="progress-container"><div id="progress-bar">0%</div></div>
+  <div id="string-list"></div>
 
 <script>
-(() => {
-  const fileInput = document.getElementById('file-input');
-  const cancelBtn = document.getElementById('cancel-button');
-  const downloadBtn = document.getElementById('download-button');
-  const searchInput = document.getElementById('search-input');
-  const progressContainer = document.getElementById('progress-container');
-  const progressBar = document.getElementById('progress-bar');
-  const stringList = document.getElementById('string-list');
-  const pagination = document.getElementById('pagination');
+const fileInput = document.getElementById('file-input');
+const stringList = document.getElementById('string-list');
+const progressContainer = document.getElementById('progress-container');
+const progressBar = document.getElementById('progress-bar');
+const searchInput = document.getElementById('search');
+const downloadBtn = document.getElementById('download-btn');
 
-  const decoder = new TextDecoder('ascii');
-  const encoder = new TextEncoder();
+let entries = [], buffer;
 
-  let bytes = null;
-  let entries = [];
-  let filteredEntries = [];
-  let isCancelled = false;
-  let currentPage = 1;
-  const pageSize = 200;
-  const maxEntries = 1000;
-
-  cancelBtn.addEventListener('click', () => {
-    isCancelled = true;
-    cancelBtn.style.display = 'none';
-    progressContainer.style.display = 'none';
-    stringList.innerHTML = '<p style="text-align:center;">Loading cancelled.</p>';
-    searchInput.disabled = true;
-    downloadBtn.disabled = true;
-  });
-
-  fileInput.addEventListener('change', () => {
-    const file = fileInput.files[0];
-    if (!file) return;
-
-    entries = [];
-    filteredEntries = [];
-    currentPage = 1;
-    isCancelled = false;
-
-    stringList.innerHTML = '';
-    pagination.textContent = '';
-    searchInput.value = '';
-    searchInput.disabled = true;
-    downloadBtn.disabled = true;
-
+fileInput.addEventListener('change', () => {
+  const file = fileInput.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    buffer = new Uint8Array(reader.result);
     progressBar.style.width = '0%';
     progressBar.textContent = '0%';
     progressContainer.style.display = 'block';
-    cancelBtn.style.display = 'inline-block';
-
-    file.arrayBuffer().then(buffer => {
-      bytes = new Uint8Array(buffer);
-      processChunks();
-    });
-  });
-
-  async function processChunks() {
-    const chunkSize = 16 * 1024;
-    let offset = 0;
-
-    while (offset < bytes.length) {
-      if (isCancelled) return;
-      const end = Math.min(offset + chunkSize, bytes.length);
-      let i = offset;
-
-      while (i < end) {
-        if (bytes[i] >= 0x20 && bytes[i] <= 0x7E) {
-          const start = i;
-          while (i < bytes.length && bytes[i] >= 0x20 && bytes[i] <= 0x7E) i++;
-          if (i < bytes.length && bytes[i] === 0x00) {
-            const str = decoder.decode(bytes.subarray(start, i));
-            if (str.length >= 3) {
-              entries.push({ offset: start, original: str, current: str });
-              if (entries.length >= maxEntries) {
-                offset = bytes.length; // break outer loop
-                break;
-              }
-            }
-          }
-        } else {
-          i++;
-        }
-      }
-
-      offset = end;
-      const percent = Math.floor((offset / bytes.length) * 100);
-      progressBar.style.width = percent + '%';
-      progressBar.textContent = percent + '%';
-
-      await new Promise(r => setTimeout(r, 0)); // yield UI
-    }
-
+    entries = extractStrings(buffer);
+    renderEntries(entries);
+    progressBar.style.width = '100%';
+    progressBar.textContent = 'Done';
     progressContainer.style.display = 'none';
-    cancelBtn.style.display = 'none';
+  };
+  reader.readAsArrayBuffer(file);
+});
 
-    if (entries.length === 0 && !isCancelled) {
-      stringList.innerHTML = '<p style="text-align:center;">No strings found.</p>';
-      searchInput.disabled = true;
-      downloadBtn.disabled = true;
-      return;
+function extractStrings(buffer) {
+  const strings = [];
+  let i = 0;
+  const minLength = 3, maxLength = 1000;
+  while (i < buffer.length) {
+    if (buffer[i] >= 0x20 && buffer[i] <= 0x7E) {
+      const start = i;
+      let length = 0;
+      while (i < buffer.length && buffer[i] >= 0x20 && buffer[i] <= 0x7E && length < maxLength) {
+        i++; length++;
+      }
+      if (i < buffer.length && buffer[i] === 0x00 && length >= minLength) {
+        const str = new TextDecoder('ascii').decode(buffer.slice(start, i));
+        strings.push({ offset: start, original: str, current: str });
+      }
     }
-
-    filteredEntries = entries.slice();
-    searchInput.disabled = false;
-    downloadBtn.disabled = false;
-
-    renderPage(1);
+    i++;
   }
+  return strings;
+}
 
-  function renderPage(pageNum) {
-    currentPage = pageNum;
-    stringList.innerHTML = '';
+function renderEntries(list) {
+  stringList.innerHTML = '';
+  const fragment = document.createDocumentFragment();
+  list.forEach((e, idx) => {
+    const div = document.createElement('div');
+    div.className = 'string-item';
 
-    const startIdx = (pageNum - 1) * pageSize;
-    const pageEntries = filteredEntries.slice(startIdx, startIdx + pageSize);
+    const label = document.createElement('label');
+    label.textContent = `Offset 0x${e.offset.toString(16)} | Original: ${e.original}`;
 
-    if (pageEntries.length === 0) {
-      stringList.innerHTML = '<p style="text-align:center;">No strings to display.</p>';
-      pagination.textContent = '';
-      return;
-    }
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = e.current;
+    input.maxLength = e.original.length;
+    input.addEventListener('input', () => {
+      if (input.value.length <= e.original.length) {
+        e.current = input.value;
+      } else {
+        input.value = e.current;
+      }
+    });
 
-    pageEntries.forEach((e, i) => {
-      const divLabel = document.createElement('div');
-      divLabel.className = 'string-label';
-      divLabel.textContent = `[${startIdx + i}] (0x${e.offset.toString(16)})`;
+    div.appendChild(label);
+    div.appendChild(input);
+    fragment.appendChild(div);
+  });
+  stringList.appendChild(fragment);
+}
 
-      const divOriginal = document.createElement('div');
-      divOriginal.className = 'string-original';
-      divOriginal.textContent = e.original;
+searchInput.addEventListener('input', () => {
+  const query = searchInput.value.toLowerCase();
+  const filtered = entries.filter(e => e.original.toLowerCase().includes(query) || e.current.toLowerCase().includes(query));
+  renderEntries(filtered);
+});
 
-      const input = document.createElement('input');
-      input.className = 'string-input';
-      input.type = 'text';
-      input.value = e.current;
-      input.maxLength = e.original.length;
-
-      input.addEventListener
+downloadBtn.addEventListener('click', () => {
+  const blob = new Uint8Array(buffer);
+  entries.forEach(e => {
+    const encoded = new TextEncoder().encode(e.current.padEnd(e.original.length, '\0'));
+    blob.set(encoded.slice(0, e.original.length), e.offset);
+  });
+  const url = URL.createObjectURL(new Blob([blob], { type: 'application/octet-stream' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'modified-metadata.dat';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+</script>
+</body>
+</html>
