@@ -1,159 +1,233 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>global-metadata.dat Editor</title>
-  <style>
-    body { font-family: sans-serif; padding: 1rem; }
-    input[type="file"] { margin-bottom: 1rem; }
-    .progress { margin: 1rem 0; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { border: 1px solid #ccc; padding: 0.5rem; }
-    th { background: #eee; }
-    input[type="text"] { width: 100%; }
-    .hidden { display: none; }
-  </style>
+<meta charset="UTF-8" />
+<title>MetaDataStringEditor - Browser Edition</title>
+<style>
+  body { font-family: Arial, sans-serif; padding: 10px; }
+  #progress { margin: 10px 0; }
+  #progressbar { width: 100%; }
+  table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+  th, td { border: 1px solid #ccc; padding: 5px; }
+  th { background: #eee; }
+  input[type="text"] { width: 100%; box-sizing: border-box; }
+</style>
 </head>
 <body>
-  <h1>global-metadata.dat String Editor</h1>
-  <input type="file" id="fileInput"><br>
-  <div class="progress">
-    <progress id="progressBar" max="100" value="0"></progress>
-    <span id="progressText">0%</span>
-  </div>
-  <input type="text" id="search" placeholder="Search (case sensitive)">
-  <button id="saveBtn">Download Modified File</button>
-  <table id="stringTable">
-    <thead>
-      <tr><th>Original</th><th>Modified</th></tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+<h1>MetaDataStringEditor - Browser Edition</h1>
+<input type="file" id="fileInput" />
+<div id="progress" hidden>
+  <progress id="progressbar" value="0" max="100"></progress>
+  <span id="progresstext">0%</span>
+</div>
+<br />
+<input type="text" id="search" placeholder="Search (case sensitive)" disabled />
+<button id="saveBtn" disabled>Save Modified File</button>
+<table id="stringsTable" hidden>
+  <thead><tr><th>Original</th><th>Modified</th></tr></thead>
+  <tbody></tbody>
+</table>
 
-  <script>
-    const fileInput = document.getElementById("fileInput");
-    const progressBar = document.getElementById("progressBar");
-    const progressText = document.getElementById("progressText");
-    const stringTable = document.getElementById("stringTable").querySelector("tbody");
-    const searchInput = document.getElementById("search");
-    const saveBtn = document.getElementById("saveBtn");
+<script>
+(() => {
+  const fileInput = document.getElementById("fileInput");
+  const progress = document.getElementById("progress");
+  const progressbar = document.getElementById("progressbar");
+  const progresstext = document.getElementById("progresstext");
+  const searchInput = document.getElementById("search");
+  const saveBtn = document.getElementById("saveBtn");
+  const stringsTable = document.getElementById("stringsTable");
+  const tbody = stringsTable.querySelector("tbody");
 
-    let originalBuffer, view, stringLiterals = [], modifiedStrings = {};
-    const TEXT_DECODER = new TextDecoder("utf-8");
-    const TEXT_ENCODER = new TextEncoder();
+  let arrayBuffer;
+  let dataView;
+  let stringLiteralCount = 0;
+  let stringLiteralOffset = 0;
+  let stringLiterals = []; // {index, offset, length, originalString, modifiedString}
+  let modifiedStrings = {};
+  const decoder = new TextDecoder("utf-8");
+  const encoder = new TextEncoder();
 
-    fileInput.addEventListener("change", () => {
-      const file = fileInput.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = () => {
-        originalBuffer = reader.result;
-        view = new DataView(originalBuffer);
-        parseHeaderAndStrings();
-      };
-      reader.readAsArrayBuffer(file);
-    });
+  // Parse header to get string literal count and offset
+  function parseHeader() {
+    // header offsets are fixed in metadata:
+    // count at 0x50, offset at 0x54 (both uint32 LE)
+    stringLiteralCount = dataView.getUint32(0x50, true);
+    stringLiteralOffset = dataView.getUint32(0x54, true);
 
-    function parseHeaderAndStrings() {
-      let offset = 0;
-      let stringLiteralCount = view.getUint32(0x50, true);
-      let stringLiteralOffset = view.getUint32(0x54, true);
-      stringLiterals = [];
+    if(stringLiteralCount <= 0 || stringLiteralOffset <= 0 || stringLiteralOffset >= arrayBuffer.byteLength) {
+      alert("Invalid string literal table data in header.");
+      return false;
+    }
+    return true;
+  }
 
-      const batchSize = 100;
-      let i = 0;
-
-      function processChunk() {
-        const start = i;
-        const end = Math.min(i + batchSize, stringLiteralCount);
-        for (; i < end; i++) {
-          let entryOffset = stringLiteralOffset + i * 8;
-          let strOffset = view.getUint32(entryOffset, true);
-          let strLength = view.getUint32(entryOffset + 4, true);
-
-          if (strOffset + strLength > originalBuffer.byteLength) continue;
-
-          const slice = new Uint8Array(originalBuffer, strOffset, strLength);
-          const str = TEXT_DECODER.decode(slice);
-          if (!str || /[\u0000-\u001F]/.test(str)) continue; // Skip invalid
-
-          stringLiterals.push({ index: i, offset: strOffset, length: strLength, value: str });
-          addStringRow(i, str);
+  // Incrementally extract strings in batches, avoid freeze
+  function extractStringsBatch(batchSize = 100) {
+    let i = 0;
+    function processChunk() {
+      let end = Math.min(i + batchSize, stringLiteralCount);
+      for(; i < end; i++) {
+        // Each entry is 8 bytes: uint32 offset, uint32 length
+        let entryOffset = stringLiteralOffset + i * 8;
+        if(entryOffset + 8 > arrayBuffer.byteLength) {
+          console.warn("Entry offset out of range", i);
+          break;
         }
-
-        updateProgress((i / stringLiteralCount) * 100);
-
-        if (i < stringLiteralCount) {
-          requestAnimationFrame(processChunk);
+        let strOffset = dataView.getUint32(entryOffset, true);
+        let strLength = dataView.getUint32(entryOffset + 4, true);
+        if(strOffset + strLength > arrayBuffer.byteLength) {
+          console.warn("String offset/length out of range", i);
+          continue;
         }
+        // Extract string bytes & decode
+        let bytes = new Uint8Array(arrayBuffer, strOffset, strLength);
+        let str = decoder.decode(bytes);
+        stringLiterals.push({index: i, offset: strOffset, length: strLength, originalString: str, modifiedString: str});
       }
 
-      processChunk();
-    }
+      updateProgress(i / stringLiteralCount * 100);
 
-    function addStringRow(index, value) {
-      const row = document.createElement("tr");
-      const original = document.createElement("td");
-      const modified = document.createElement("td");
+      if(i < stringLiteralCount) {
+        setTimeout(processChunk, 0);
+      } else {
+        renderTable();
+        progress.hidden = true;
+        searchInput.disabled = false;
+        saveBtn.disabled = false;
+      }
+    }
+    processChunk();
+  }
+
+  function updateProgress(percent) {
+    progressbar.value = percent;
+    progresstext.textContent = percent.toFixed(1) + "%";
+  }
+
+  // Render all strings in the table
+  function renderTable() {
+    tbody.innerHTML = "";
+    for(const item of stringLiterals) {
+      const tr = document.createElement("tr");
+      const tdOrig = document.createElement("td");
+      tdOrig.textContent = item.originalString;
+      const tdMod = document.createElement("td");
       const input = document.createElement("input");
       input.type = "text";
-      input.value = value;
-      input.dataset.index = index;
-      input.addEventListener("input", (e) => {
-        modifiedStrings[index] = e.target.value;
+      input.value = item.modifiedString;
+      input.dataset.index = item.index;
+      input.addEventListener("input", e => {
+        const idx = e.target.dataset.index;
+        stringLiterals[idx].modifiedString = e.target.value;
+        modifiedStrings[idx] = e.target.value;
+        filterTable(); // keep filtered after edit
       });
+      tdMod.appendChild(input);
+      tr.appendChild(tdOrig);
+      tr.appendChild(tdMod);
+      tbody.appendChild(tr);
+    }
+    stringsTable.hidden = false;
+  }
 
-      original.textContent = value;
-      modified.appendChild(input);
-      row.appendChild(original);
-      row.appendChild(modified);
-      stringTable.appendChild(row);
+  // Filter strings by search input (case sensitive)
+  function filterTable() {
+    const filter = searchInput.value;
+    for(const tr of tbody.children) {
+      const origText = tr.cells[0].textContent;
+      tr.style.display = filter ? (origText.includes(filter) ? "" : "none") : "";
+    }
+  }
+
+  searchInput.addEventListener("input", filterTable);
+
+  // Save modified strings back to a new ArrayBuffer and download
+  saveBtn.addEventListener("click", () => {
+    let newSize = arrayBuffer.byteLength + 1024 * 1024 * 5; // add 5MB buffer for appended strings
+    let newBuffer = new ArrayBuffer(newSize);
+    let newView = new DataView(newBuffer);
+    let newUint8 = new Uint8Array(newBuffer);
+
+    // Copy original data to new buffer
+    newUint8.set(new Uint8Array(arrayBuffer));
+
+    // We'll append strings that don't fit in original space starting here:
+    let appendPos = arrayBuffer.byteLength;
+
+    // Function to write uint32 LE to new buffer
+    function setUint32LE(offset, val) {
+      newView.setUint32(offset, val, true);
     }
 
-    function updateProgress(val) {
-      progressBar.value = val;
-      progressText.textContent = val.toFixed(1) + "%";
-    }
+    for(const item of stringLiterals) {
+      const idx = item.index;
+      const modified = item.modifiedString;
+      const origLen = item.length;
+      const origOffset = item.offset;
 
-    searchInput.addEventListener("input", () => {
-      const searchVal = searchInput.value;
-      for (const row of stringTable.rows) {
-        const cellText = row.cells[0].textContent;
-        row.style.display = (searchVal && !cellText.includes(searchVal)) ? "none" : "";
-      }
-    });
+      const encoded = encoder.encode(modified);
 
-    saveBtn.addEventListener("click", () => {
-      const newBuffer = new Uint8Array(originalBuffer.byteLength + 1000000); // Allocate space for appended
-      newBuffer.set(new Uint8Array(originalBuffer));
-      let newOffset = originalBuffer.byteLength;
+      // Location of this string literal entry in string literal table
+      const entryOffset = stringLiteralOffset + idx * 8;
 
-      for (const item of stringLiterals) {
-        const index = item.index;
-        if (!(index in modifiedStrings)) continue;
-
-        const modified = modifiedStrings[index];
-        const original = item.value;
-
-        const encoded = TEXT_ENCODER.encode(modified);
-        const entryOffset = view.getUint32(0x54, true) + index * 8;
-
-        if (encoded.length <= item.length) {
-          newBuffer.set(encoded, item.offset);
-        } else {
-          newBuffer.set(encoded, newOffset);
-          new DataView(newBuffer.buffer).setUint32(entryOffset, newOffset, true);
-          new DataView(newBuffer.buffer).setUint32(entryOffset + 4, encoded.length, true);
-          newOffset += encoded.length;
+      if(encoded.length <= origLen) {
+        // Overwrite in place, pad with zeros if shorter
+        newUint8.set(encoded, origOffset);
+        if(encoded.length < origLen) {
+          newUint8.fill(0, origOffset + encoded.length, origOffset + origLen);
         }
+        // Pointer and length remain same
+      } else {
+        // Append at the end, update pointer and length in table
+        newUint8.set(encoded, appendPos);
+        setUint32LE(entryOffset, appendPos);
+        setUint32LE(entryOffset + 4, encoded.length);
+        appendPos += encoded.length;
       }
+    }
 
-      const blob = new Blob([newBuffer.slice(0, newOffset)], { type: "application/octet-stream" });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = "modified-global-metadata.dat";
-      a.click();
-    });
-  </script>
+    // Slice buffer to actual used size
+    const finalBuffer = newBuffer.slice(0, appendPos);
+
+    // Download file
+    const blob = new Blob([finalBuffer], {type: "application/octet-stream"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "modified-global-metadata.dat";
+    a.click();
+  });
+
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files[0];
+    if(!file) return;
+
+    // Reset UI
+    progress.hidden = false;
+    progressbar.value = 0;
+    progresstext.textContent = "0%";
+    searchInput.value = "";
+    searchInput.disabled = true;
+    saveBtn.disabled = true;
+    stringsTable.hidden = true;
+    tbody.innerHTML = "";
+    stringLiterals = [];
+    modifiedStrings = {};
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      arrayBuffer = reader.result;
+      dataView = new DataView(arrayBuffer);
+
+      if(!parseHeader()) {
+        progress.hidden = true;
+        return;
+      }
+      extractStringsBatch(100);
+    };
+    reader.readAsArrayBuffer(file);
+  });
+})();
+</script>
 </body>
 </html>
