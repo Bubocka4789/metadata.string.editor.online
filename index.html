@@ -2,23 +2,84 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Metadata String Editor</title>
   <style>
-    body { margin: 0; font-family: system-ui; background: #121212; color: #e0e0e0; padding: 1rem; }
-    h1 { text-align: center; }
-    #controls { display: flex; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; justify-content: center; }
-    input[type="file"], input[type="text"], button {
-      background: #000; color: #eee; border: 1px solid #555; border-radius: 4px; padding: .4rem; font-size: 1rem;
+    body {
+      margin: 0;
+      font-family: system-ui, sans-serif;
+      background: #121212;
+      color: #e0e0e0;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
     }
-    #progress-container { display: none; width: 100%; max-width: 600px; margin: 0 auto 1rem; background: #333; border-radius: 8px; overflow: hidden; }
-    #progress-bar { height: 20px; width: 0%; background: #4caf50; text-align: center; color: #fff; font-weight: bold; transition: width 0.2s ease; }
-    #string-list { max-height: 60vh; overflow-y: auto; border: 1px solid #444; border-radius: 6px; padding: .5rem; }
-    .string-item {
-      background: #1e1e1e;
-      padding: .5rem;
+    h1 {
+      text-align: center;
+      margin-bottom: 1rem;
+    }
+    #controls {
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-bottom: 1rem;
+    }
+    input[type="file"],
+    input[type="text"],
+    button {
+      background: #000;
+      color: #eee;
+      border: 1px solid #555;
       border-radius: 4px;
-      margin-bottom: .5rem;
+      padding: 0.4rem 0.6rem;
+      font-size: 1rem;
+      outline-offset: 2px;
+      transition: border-color 0.2s ease;
+    }
+    input[type="file"]:focus,
+    input[type="text"]:focus,
+    button:focus {
+      border-color: #4caf50;
+    }
+    #progress-container {
+      display: none;
+      width: 100%;
+      max-width: 600px;
+      margin: 0 auto 1rem auto;
+      background: #333;
+      border-radius: 8px;
+      overflow: hidden;
+      height: 20px;
+    }
+    #progress-bar {
+      height: 100%;
+      width: 0%;
+      background: #4caf50;
+      text-align: center;
+      color: #fff;
+      font-weight: bold;
+      line-height: 20px;
+      user-select: none;
+      transition: width 0.2s ease;
+      font-size: 0.9rem;
+    }
+    #string-list {
+      max-height: 60vh;
+      overflow-y: auto;
+      border: 1px solid #444;
+      border-radius: 6px;
+      padding: 0.5rem;
+      background: #1e1e1e;
+      flex-grow: 1;
+      user-select: text;
+    }
+    .string-item {
+      background: #2a2a2a;
+      padding: 0.5rem;
+      border-radius: 4px;
+      margin-bottom: 0.5rem;
       display: flex;
       gap: 1rem;
       align-items: center;
@@ -27,18 +88,22 @@
     .string-label {
       flex-basis: 100%;
       color: #90caf9;
-      font-size: .85rem;
-      margin-bottom: .25rem;
+      font-size: 0.85rem;
+      margin-bottom: 0.25rem;
+      font-family: monospace;
+      user-select: text;
     }
     .string-col {
       flex: 1 1 45%;
       display: flex;
       flex-direction: column;
+      min-width: 200px;
     }
     .string-col label {
-      font-size: .75rem;
-      margin-bottom: .15rem;
+      font-size: 0.75rem;
+      margin-bottom: 0.15rem;
       color: #bbb;
+      user-select: none;
     }
     .string-col input {
       width: 100%;
@@ -49,23 +114,35 @@
       border-radius: 4px;
       color: #eee;
       padding: 0.3rem 0.5rem;
+      transition: border-color 0.2s ease;
+    }
+    .string-col input:focus {
+      border-color: #4caf50;
+      outline: none;
     }
     .string-col input[readonly] {
       background: #222;
       color: #777;
       cursor: default;
     }
+    @media (max-width: 600px) {
+      .string-col {
+        flex-basis: 100%;
+      }
+    }
   </style>
 </head>
 <body>
   <h1>Metadata String Editor</h1>
   <div id="controls">
-    <input type="file" id="file-input" accept=".dat">
-    <input type="text" id="search" placeholder="Search...">
-    <button id="download-btn">Download</button>
+    <input type="file" id="file-input" accept=".dat" aria-label="Load .dat file" />
+    <input type="text" id="search" placeholder="Search..." aria-label="Search strings" />
+    <button id="download-btn" aria-label="Download modified file">Download</button>
   </div>
-  <div id="progress-container"><div id="progress-bar">0%</div></div>
-  <div id="string-list"></div>
+  <div id="progress-container" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+    <div id="progress-bar">0%</div>
+  </div>
+  <div id="string-list" aria-live="polite" aria-relevant="additions"></div>
 
   <script>
     const fileInput = document.getElementById('file-input');
@@ -75,33 +152,41 @@
     const searchInput = document.getElementById('search');
     const downloadBtn = document.getElementById('download-btn');
 
-    let entries = [], buffer;
+    let entries = [];
+    let buffer = null;
 
     fileInput.addEventListener('change', () => {
       const file = fileInput.files[0];
       if (!file) return;
 
+      entries = [];
+      stringList.innerHTML = '';
+      progressContainer.style.display = 'block';
+      updateProgress(0);
+
       const reader = new FileReader();
       reader.onload = () => {
         buffer = new Uint8Array(reader.result);
-        entries = [];
-        stringList.innerHTML = '';
-        progressContainer.style.display = 'block';
-        progressBar.style.width = '0%';
-        progressBar.textContent = '0%';
-
         extractStrings(buffer, (results) => {
           entries = results;
           renderEntries(entries);
-          progressBar.textContent = 'Done';
-          progressBar.style.width = '100%';
-          progressContainer.style.display = 'none';
+          updateProgress(100);
+          setTimeout(() => {
+            progressContainer.style.display = 'none';
+          }, 400);
         });
       };
       reader.readAsArrayBuffer(file);
     });
 
-    // Extract ASCII strings (3+ chars) ending with 0x00 from buffer in chunks to avoid freezing
+    // Updates progress bar UI
+    function updateProgress(percent) {
+      progressBar.style.width = percent + '%';
+      progressBar.textContent = percent + '%';
+      progressContainer.setAttribute('aria-valuenow', percent);
+    }
+
+    // Extract ASCII strings (3+ chars) ending with 0x00 or at EOF, chunked async for UI responsiveness
     function extractStrings(buf, callback) {
       const strings = [];
       const minLength = 3;
@@ -111,26 +196,29 @@
 
       function processChunk() {
         const end = Math.min(i + chunkSize, buf.length);
+
         while (i < end) {
           if (buf[i] >= 0x20 && buf[i] <= 0x7E) {
             const start = i;
             while (i < buf.length && buf[i] >= 0x20 && buf[i] <= 0x7E) i++;
-            if (i < buf.length && buf[i] === 0x00) {
+
+            // Accept string if followed by null terminator or end of buffer
+            if (i === buf.length || buf[i] === 0x00) {
               const str = decoder.decode(buf.slice(start, i));
               if (str.length >= minLength) {
                 strings.push({ offset: start, original: str, current: str });
               }
+              if (i < buf.length && buf[i] === 0x00) i++; // skip null terminator
             }
+          } else {
+            i++;
           }
-          i++;
         }
 
-        const percent = Math.floor((i / buf.length) * 100);
-        progressBar.style.width = percent + '%';
-        progressBar.textContent = percent + '%';
+        updateProgress(Math.floor((i / buf.length) * 100));
 
         if (i < buf.length) {
-          setTimeout(processChunk, 0); // yield to UI
+          setTimeout(processChunk, 0); // yield to UI thread
         } else {
           callback(strings);
         }
@@ -139,21 +227,24 @@
       processChunk();
     }
 
-    // Render strings in two columns: Original (readonly) and Modified (editable)
+    // Render string entries with original and editable modified inputs
     function renderEntries(list) {
       stringList.innerHTML = '';
-      const frag = document.createDocumentFragment();
+      if (list.length === 0) {
+        stringList.textContent = 'No strings found.';
+        return;
+      }
 
-      list.forEach((entry, idx) => {
+      const fragment = document.createDocumentFragment();
+
+      list.forEach((entry) => {
         const div = document.createElement('div');
         div.className = 'string-item';
 
-        // Label with offset
         const label = document.createElement('div');
         label.className = 'string-label';
-        label.textContent = `[0x${entry.offset.toString(16)}]`;
+        label.textContent = `[0x${entry.offset.toString(16).toUpperCase().padStart(8, '0')}]`;
 
-        // Original column
         const originalCol = document.createElement('div');
         originalCol.className = 'string-col';
         const originalLabel = document.createElement('label');
@@ -162,10 +253,10 @@
         originalInput.type = 'text';
         originalInput.value = entry.original;
         originalInput.readOnly = true;
+        originalInput.setAttribute('aria-label', `Original string at offset 0x${entry.offset.toString(16)}`);
         originalCol.appendChild(originalLabel);
         originalCol.appendChild(originalInput);
 
-        // Modified column
         const modifiedCol = document.createElement('div');
         modifiedCol.className = 'string-col';
         const modifiedLabel = document.createElement('label');
@@ -174,10 +265,9 @@
         modifiedInput.type = 'text';
         modifiedInput.value = entry.current;
         modifiedInput.maxLength = entry.original.length;
+        modifiedInput.setAttribute('aria-label', `Modified string at offset 0x${entry.offset.toString(16)}`);
 
-        // Allow only ASCII chars and update entry.current on input
         modifiedInput.addEventListener('input', () => {
-          // Filter non-ASCII chars
           let filtered = modifiedInput.value.replace(/[^\x20-\x7E]/g, '');
           if (filtered.length > entry.original.length) {
             filtered = filtered.slice(0, entry.original.length);
@@ -193,36 +283,46 @@
         div.appendChild(originalCol);
         div.appendChild(modifiedCol);
 
-        frag.appendChild(div);
+        fragment.appendChild(div);
       });
 
-      stringList.appendChild(frag);
+      stringList.appendChild(fragment);
     }
 
-    // Filter entries on search
+    // Filter rendered entries based on search input
     searchInput.addEventListener('input', () => {
-      const q = searchInput.value.toLowerCase();
+      const query = searchInput.value.trim().toLowerCase();
+      if (!query) {
+        renderEntries(entries);
+        return;
+      }
       const filtered = entries.filter(e =>
-        e.original.toLowerCase().includes(q) ||
-        e.current.toLowerCase().includes(q)
+        e.original.toLowerCase().includes(query) || e.current.toLowerCase().includes(query)
       );
       renderEntries(filtered);
     });
 
-    // Download modified buffer
+    // Download the buffer with modifications applied
     downloadBtn.addEventListener('click', () => {
       if (!buffer || entries.length === 0) return;
-      const updated = new Uint8Array(buffer);
+
+      const updated = new Uint8Array(buffer); // copy original buffer
       entries.forEach(e => {
-        // Pad with null bytes to keep original length
+        // Pad modified string with null bytes to maintain original length
         const enc = new TextEncoder().encode(e.current.padEnd(e.original.length, '\0'));
         updated.set(enc.slice(0, e.original.length), e.offset);
       });
+
       const blob = new Blob([updated], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+
       const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
+      a.href = url;
       a.download = 'modified-metadata.dat';
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     });
   </script>
 </body>
