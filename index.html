@@ -1,169 +1,159 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8">
   <title>global-metadata.dat Editor</title>
   <style>
-    body { font-family: sans-serif; margin: 0; padding: 0; }
-    #container { display: flex; flex-direction: column; height: 100vh; }
-    #controls { padding: 10px; background: #f4f4f4; display: flex; align-items: center; gap: 10px; }
-    #progress { flex: 1; }
-    #tableContainer { overflow-y: scroll; flex: 1; font-family: monospace; }
-    table { border-collapse: collapse; width: 100%; }
-    td, th { border: 1px solid #ccc; padding: 4px; white-space: pre; }
+    body { font-family: sans-serif; padding: 1rem; }
+    input[type="file"] { margin-bottom: 1rem; }
+    .progress { margin: 1rem 0; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #ccc; padding: 0.5rem; }
+    th { background: #eee; }
     input[type="text"] { width: 100%; }
+    .hidden { display: none; }
   </style>
 </head>
 <body>
-<div id="container">
-  <div id="controls">
-    <input type="file" id="fileInput" />
-    <input type="text" id="searchInput" placeholder="Search (case-sensitive)" />
-    <progress id="progress" max="100" value="0"></progress>
-    <button id="saveBtn">Save</button>
+  <h1>global-metadata.dat String Editor</h1>
+  <input type="file" id="fileInput"><br>
+  <div class="progress">
+    <progress id="progressBar" max="100" value="0"></progress>
+    <span id="progressText">0%</span>
   </div>
-  <div id="tableContainer">
-    <table id="stringTable">
-      <thead><tr><th>Offset</th><th>Original</th><th>Modified</th></tr></thead>
-      <tbody></tbody>
-    </table>
-  </div>
-</div>
+  <input type="text" id="search" placeholder="Search (case sensitive)">
+  <button id="saveBtn">Download Modified File</button>
+  <table id="stringTable">
+    <thead>
+      <tr><th>Original</th><th>Modified</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
 
-<script>
-let originalBuffer, stringEntries = [], modifiedStrings = {};
+  <script>
+    const fileInput = document.getElementById("fileInput");
+    const progressBar = document.getElementById("progressBar");
+    const progressText = document.getElementById("progressText");
+    const stringTable = document.getElementById("stringTable").querySelector("tbody");
+    const searchInput = document.getElementById("search");
+    const saveBtn = document.getElementById("saveBtn");
 
-const readString = (dataView, offset, length) => {
-  const bytes = new Uint8Array(dataView.buffer, offset, length);
-  return new TextDecoder('utf-8').decode(bytes);
-};
+    let originalBuffer, view, stringLiterals = [], modifiedStrings = {};
+    const TEXT_DECODER = new TextDecoder("utf-8");
+    const TEXT_ENCODER = new TextEncoder();
 
-document.getElementById('fileInput').addEventListener('change', async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-
-  const arrayBuffer = await file.arrayBuffer();
-  originalBuffer = arrayBuffer;
-
-  const dataView = new DataView(arrayBuffer);
-  const length = arrayBuffer.byteLength;
-  const printable = /[ -~]/; // ASCII printable (includes space)
-  let strings = [], offset = 0, str = '';
-
-  const addString = (str, startOffset) => {
-    if (str.length >= 4) {
-      strings.push({ offset: startOffset, original: str });
-    }
-  };
-
-  const batchSize = 100;
-  let currentOffset = 0;
-
-  const processChunk = () => {
-    const start = currentOffset;
-    let added = 0;
-
-    while (currentOffset < length) {
-      const byte = dataView.getUint8(currentOffset);
-      const char = String.fromCharCode(byte);
-
-      if (printable.test(char)) {
-        if (str === '') offset = currentOffset;
-        str += char;
-      } else {
-        if (str.length >= 4) {
-          addString(str, offset);
-          added++;
-          if (added >= batchSize) break;
-        }
-        str = '';
-      }
-
-      currentOffset++;
-    }
-
-    document.getElementById('progress').value = Math.floor((currentOffset / length) * 100);
-
-    if (currentOffset >= length) {
-      populateTable(strings);
-    } else {
-      setTimeout(processChunk, 0); // avoid blocking UI
-    }
-  };
-
-  processChunk();
-});
-
-function populateTable(strings) {
-  const tbody = document.querySelector('#stringTable tbody');
-  tbody.innerHTML = '';
-  stringEntries = strings;
-
-  for (const { offset, original } of strings) {
-    const row = document.createElement('tr');
-    const offsetCell = document.createElement('td');
-    offsetCell.textContent = `0x${offset.toString(16)}`;
-    const originalCell = document.createElement('td');
-    originalCell.textContent = original;
-    const modifiedCell = document.createElement('td');
-    const input = document.createElement('input');
-    input.value = original;
-    input.dataset.offset = offset;
-    input.addEventListener('input', () => {
-      modifiedStrings[offset] = input.value;
+    fileInput.addEventListener("change", () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        originalBuffer = reader.result;
+        view = new DataView(originalBuffer);
+        parseHeaderAndStrings();
+      };
+      reader.readAsArrayBuffer(file);
     });
-    modifiedCell.appendChild(input);
-    row.append(offsetCell, originalCell, modifiedCell);
-    tbody.appendChild(row);
-  }
-}
 
-document.getElementById('searchInput').addEventListener('input', (e) => {
-  const term = e.target.value;
-  const rows = document.querySelectorAll('#stringTable tbody tr');
-  rows.forEach(row => {
-    const original = row.cells[1].textContent;
-    const modified = row.cells[2].firstChild.value;
-    row.style.display = (original.includes(term) || modified.includes(term)) ? '' : 'none';
-  });
-});
+    function parseHeaderAndStrings() {
+      let offset = 0;
+      let stringLiteralCount = view.getUint32(0x50, true);
+      let stringLiteralOffset = view.getUint32(0x54, true);
+      stringLiterals = [];
 
-document.getElementById('saveBtn').addEventListener('click', () => {
-  const view = new Uint8Array(originalBuffer);
-  const encoder = new TextEncoder();
-  let appendedData = [];
+      const batchSize = 100;
+      let i = 0;
 
-  for (const entry of stringEntries) {
-    const { offset, original } = entry;
-    const modified = modifiedStrings[offset];
+      function processChunk() {
+        const start = i;
+        const end = Math.min(i + batchSize, stringLiteralCount);
+        for (; i < end; i++) {
+          let entryOffset = stringLiteralOffset + i * 8;
+          let strOffset = view.getUint32(entryOffset, true);
+          let strLength = view.getUint32(entryOffset + 4, true);
 
-    if (modified && modified !== original) {
-      const encoded = encoder.encode(modified);
-      if (encoded.length <= original.length) {
-        // In-place overwrite
-        view.set(encoded, offset);
-        for (let i = offset + encoded.length; i < offset + original.length; i++) {
-          view[i] = 0x20; // pad with space
+          if (strOffset + strLength > originalBuffer.byteLength) continue;
+
+          const slice = new Uint8Array(originalBuffer, strOffset, strLength);
+          const str = TEXT_DECODER.decode(slice);
+          if (!str || /[\u0000-\u001F]/.test(str)) continue; // Skip invalid
+
+          stringLiterals.push({ index: i, offset: strOffset, length: strLength, value: str });
+          addStringRow(i, str);
         }
-      } else {
-        // Append to end
-        const newOffset = view.length + appendedData.length;
-        appendedData.push(...encoded);
-        // TODO: Update offset in header if needed
+
+        updateProgress((i / stringLiteralCount) * 100);
+
+        if (i < stringLiteralCount) {
+          requestAnimationFrame(processChunk);
+        }
       }
+
+      processChunk();
     }
-  }
 
-  const finalArray = new Uint8Array(view.length + appendedData.length);
-  finalArray.set(view);
-  finalArray.set(new Uint8Array(appendedData), view.length);
+    function addStringRow(index, value) {
+      const row = document.createElement("tr");
+      const original = document.createElement("td");
+      const modified = document.createElement("td");
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = value;
+      input.dataset.index = index;
+      input.addEventListener("input", (e) => {
+        modifiedStrings[index] = e.target.value;
+      });
 
-  const blob = new Blob([finalArray], { type: 'application/octet-stream' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'global-metadata-modified.dat';
-  a.click();
-});
-</script>
+      original.textContent = value;
+      modified.appendChild(input);
+      row.appendChild(original);
+      row.appendChild(modified);
+      stringTable.appendChild(row);
+    }
+
+    function updateProgress(val) {
+      progressBar.value = val;
+      progressText.textContent = val.toFixed(1) + "%";
+    }
+
+    searchInput.addEventListener("input", () => {
+      const searchVal = searchInput.value;
+      for (const row of stringTable.rows) {
+        const cellText = row.cells[0].textContent;
+        row.style.display = (searchVal && !cellText.includes(searchVal)) ? "none" : "";
+      }
+    });
+
+    saveBtn.addEventListener("click", () => {
+      const newBuffer = new Uint8Array(originalBuffer.byteLength + 1000000); // Allocate space for appended
+      newBuffer.set(new Uint8Array(originalBuffer));
+      let newOffset = originalBuffer.byteLength;
+
+      for (const item of stringLiterals) {
+        const index = item.index;
+        if (!(index in modifiedStrings)) continue;
+
+        const modified = modifiedStrings[index];
+        const original = item.value;
+
+        const encoded = TEXT_ENCODER.encode(modified);
+        const entryOffset = view.getUint32(0x54, true) + index * 8;
+
+        if (encoded.length <= item.length) {
+          newBuffer.set(encoded, item.offset);
+        } else {
+          newBuffer.set(encoded, newOffset);
+          new DataView(newBuffer.buffer).setUint32(entryOffset, newOffset, true);
+          new DataView(newBuffer.buffer).setUint32(entryOffset + 4, encoded.length, true);
+          newOffset += encoded.length;
+        }
+      }
+
+      const blob = new Blob([newBuffer.slice(0, newOffset)], { type: "application/octet-stream" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "modified-global-metadata.dat";
+      a.click();
+    });
+  </script>
 </body>
 </html>
