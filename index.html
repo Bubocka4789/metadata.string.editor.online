@@ -3,113 +3,58 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Metadata String Editor (Fixed + Search)</title>
+<title>Ugly Metadata Editor with Search</title>
 <style>
   body {
-    margin: 0;
-    font-family: system-ui;
-    background: #121212;
-    color: #e0e0e0;
-    padding: 1.5rem;
+    font-family: monospace;
+    background: white;
+    color: black;
+    padding: 10px;
   }
-  h1 {
-    text-align: center;
-    margin-top: 0;
-  }
-  #search-container {
-    margin: 1rem 0 0.5rem 0;
-    text-align: center;
+  #file-input {
+    font-size: 20px;
+    margin-bottom: 10px;
   }
   #search-input {
+    font-size: 20px;
     width: 100%;
-    max-width: 400px;
-    padding: 0.4rem 0.6rem;
-    font-size: 1rem;
-    border-radius: 6px;
-    border: 1px solid #555;
-    background: #222;
-    color: #eee;
-  }
-  #progress-container {
-    display: none;
-    margin-top: 1rem;
-    background: #333;
-    border-radius: 8px;
-    overflow: hidden;
-  }
-  #progress-bar {
-    height: 20px;
-    width: 0%;
-    background: #4caf50;
-    text-align: center;
-    color: #fff;
-    font-weight: 600;
-    font-size: 0.8rem;
-    transition: width 0.2s ease;
+    margin-bottom: 10px;
+    border: 2px solid red;
+    padding: 5px;
+    background: yellow;
+    color: black;
   }
   #string-list {
-    margin-top: 1.5rem;
-    max-height: 70vh;
-    overflow-y: auto;
-    border: 1px solid #444;
-    border-radius: 6px;
-    padding: 0.5rem;
-    font-family: monospace;
+    max-height: 400px;
+    overflow-y: scroll;
+    border: 2px solid black;
+    padding: 5px;
   }
   .string-item {
-    margin-bottom: 0.5rem;
-    background: #1e1e1e;
-    padding: 0.5rem;
-    border-radius: 4px;
-    display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
+    margin-bottom: 8px;
   }
-  .string-item label {
-    font-size: 0.85rem;
-    color: #90caf9;
-    user-select: text;
+  .string-label {
+    font-weight: bold;
   }
-  input[type="file"] {
-    margin-top: 0.5rem;
-    background: #222;
-    border: 1px solid #555;
-    border-radius: 4px;
-    color: #eee;
-    padding: 0.3rem;
-  }
-  input.edit {
+  .string-input {
     font-family: monospace;
-    color: #eee;
-    background: #000;
-    border: 1px solid #555;
-    border-radius: 4px;
-    padding: 0.3rem;
+    font-size: 16px;
     width: 100%;
     box-sizing: border-box;
-    caret-color: #4caf50;
   }
 </style>
 </head>
 <body>
-<h1>Metadata String Editor (Fixed + Search)</h1>
 
 <input type="file" id="file-input" accept=".dat" />
+<input type="text" id="search-input" placeholder="Type here to search strings..." />
 
-<div id="search-container" style="display:none;">
-  <input type="text" id="search-input" placeholder="Search strings..." autocomplete="off" spellcheck="false" autocorrect="off" />
-</div>
-
-<div id="progress-container"><div id="progress-bar">0%</div></div>
 <div id="string-list"></div>
 
 <script>
 const fileInput = document.getElementById('file-input');
-const stringList = document.getElementById('string-list');
-const progressContainer = document.getElementById('progress-container');
-const progressBar = document.getElementById('progress-bar');
-const searchContainer = document.getElementById('search-container');
 const searchInput = document.getElementById('search-input');
+const stringList = document.getElementById('string-list');
 
 let allEntries = [];
 
@@ -118,96 +63,49 @@ fileInput.addEventListener('change', () => {
   if (!file) return;
 
   stringList.innerHTML = '';
-  progressBar.style.width = '0%';
-  progressBar.textContent = '0%';
-  progressContainer.style.display = 'block';
-  searchContainer.style.display = 'none';
-  searchInput.value = '';
+  allEntries = [];
 
-  file.arrayBuffer().then((buf) => {
+  file.arrayBuffer().then(buf => {
     const bytes = new Uint8Array(buf);
-    const entries = [];
     const decoder = new TextDecoder('ascii');
 
-    const chunkSize = 131072; // 128 KB
-    let offset = 0;
-
-    function processChunk() {
-      const end = Math.min(offset + chunkSize, bytes.length);
-      let i = offset;
-
-      while (i < end) {
-        if (bytes[i] >= 0x20 && bytes[i] <= 0x7E) { // printable ascii
-          const start = i;
-          while (i < bytes.length && bytes[i] >= 0x20 && bytes[i] <= 0x7E) i++;
-
-          if (i < bytes.length && bytes[i] === 0x00) {
-            const str = decoder.decode(bytes.subarray(start, i));
-            if (str.length >= 3) {
-              entries.push({ offset: start, original: str, current: str });
-            }
-            i++; // skip null terminator
-          } else if (i === bytes.length) {
-            const str = decoder.decode(bytes.subarray(start, i));
-            if (str.length >= 3) {
-              entries.push({ offset: start, original: str, current: str });
-            }
+    let i = 0;
+    while (i < bytes.length) {
+      if (bytes[i] >= 0x20 && bytes[i] <= 0x7E) {
+        let start = i;
+        while (i < bytes.length && bytes[i] >= 0x20 && bytes[i] <= 0x7E) i++;
+        if (i < bytes.length && bytes[i] === 0x00) {
+          const str = decoder.decode(bytes.subarray(start, i));
+          if (str.length >= 3) {
+            allEntries.push({ offset: start, original: str, current: str });
           }
+          i++;
         } else {
           i++;
         }
-      }
-
-      offset = end;
-      const percent = Math.floor((offset / bytes.length) * 100);
-      progressBar.style.width = percent + '%';
-      progressBar.textContent = percent + '%';
-
-      if (offset < bytes.length) {
-        setTimeout(processChunk, 0);
       } else {
-        progressBar.style.width = '100%';
-        progressBar.textContent = 'Done';
-        progressContainer.style.display = 'none';
-        console.log('Strings found:', entries.length);
-        allEntries = entries;
-        if (entries.length === 0) {
-          stringList.innerHTML = '<p>No strings found.</p>';
-          searchContainer.style.display = 'none';
-        } else {
-          searchContainer.style.display = 'block';
-          renderEntries(entries);
-        }
+        i++;
       }
     }
-
-    processChunk();
-  }).catch((e) => {
-    progressContainer.style.display = 'none';
-    stringList.innerHTML = `<p style="color:red;">Error reading file: ${e.message}</p>`;
+    renderEntries(allEntries);
   });
 });
 
 function renderEntries(entries) {
-  stringList.innerHTML = ''; // Clear previous
-  const frag = document.createDocumentFragment();
-
+  stringList.innerHTML = '';
   entries.forEach((e, idx) => {
     const div = document.createElement('div');
     div.className = 'string-item';
-    div.dataset.index = idx;
 
-    const label = document.createElement('label');
+    const label = document.createElement('div');
+    label.className = 'string-label';
     label.textContent = `[${idx}] (0x${e.offset.toString(16)})`;
 
     const input = document.createElement('input');
-    input.className = 'edit';
+    input.className = 'string-input';
     input.type = 'text';
     input.value = e.current;
     input.maxLength = e.original.length;
-    input.spellcheck = false;
-    input.autocorrect = 'off';
-    input.autocomplete = 'off';
     input.addEventListener('input', () => {
       if (input.value.length <= e.original.length) {
         e.current = input.value;
@@ -218,20 +116,16 @@ function renderEntries(entries) {
 
     div.appendChild(label);
     div.appendChild(input);
-    frag.appendChild(div);
+    stringList.appendChild(div);
   });
-
-  stringList.appendChild(frag);
 }
 
 searchInput.addEventListener('input', () => {
   const query = searchInput.value.toLowerCase();
-  const items = stringList.querySelectorAll('.string-item');
-
-  items.forEach((div) => {
-    const idx = parseInt(div.dataset.index, 10);
-    const entry = allEntries[idx];
-    if (!query || entry.current.toLowerCase().includes(query)) {
+  const children = Array.from(stringList.children);
+  children.forEach((div, i) => {
+    const e = allEntries[i];
+    if (!query || e.current.toLowerCase().includes(query)) {
       div.style.display = '';
     } else {
       div.style.display = 'none';
@@ -239,5 +133,6 @@ searchInput.addEventListener('input', () => {
   });
 });
 </script>
+
 </body>
 </html>
