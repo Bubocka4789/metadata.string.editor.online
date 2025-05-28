@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Metadata String Editor</title>
+  <style>
+    :root{
+      --bg:#f4f4f4;--fg:#111;--accent:#333;--row-even:#f9f9f9;--border:#ddd;
+    }
+    .dark{
+      --bg:#1e1e1e;--fg:#e2e2e2;--accent:#3a3a3a;--row-even:#2a2a2a;--border:#444;
+    }
+    body{margin:0;font-family:system-ui;background:var(--bg);color:var(--fg);}
+    header{display:flex;align-items:center;gap:8px;padding:12px;background:var(--accent);color:#fff;}
+    h1{font-size:1.2rem;margin:0;flex:1 1 auto;}
+    main{padding:12px;}
+    input[type="file"],input[type="text"]{margin-right:8px;}
+    button{padding:6px 12px;margin-right:8px;cursor:pointer;}
+    #tableWrap{height:70vh;overflow:auto;border:1px solid var(--border);}
+    table{width:100%;border-collapse:collapse;}
+    th,td{border:1px solid var(--border);padding:4px 6px;font-size:0.9rem;}
+    th{position:sticky;top:0;background:var(--accent);color:#fff;}
+    tr:nth-child(even){background:var(--row-even);}  
+    input.string-edit{width:100%;box-sizing:border-box;border:none;background:transparent;color:inherit;}
+    input.string-edit:focus{outline:1px solid var(--accent);background:rgba(0,0,0,0.05);}  
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Metadata String Editor</h1>
+    <button id="toggleTheme">🌙 Dark Mode</button>
+  </header>
+  <main>
+    <input type="file" id="fileInput" accept=".dat" />
+    <input type="text" id="searchInput" placeholder="Search…" />
+    <button id="downloadBtn" disabled>Download Modified File</button>
+
+    <div id="tableWrap">
+      <table id="stringTable">
+        <thead>
+          <tr><th style="width:80px">Offset</th><th style="width:40%">Original</th><th>Current</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </main>
+
+<script>
+// ------------------ Theme Toggle ------------------
+const bodyEl=document.body;
+const toggleBtn=document.getElementById('toggleTheme');
+let dark=false;
+function applyTheme(){
+  bodyEl.classList.toggle('dark',dark);
+  toggleBtn.textContent=dark?'☀️ Light Mode':'🌙 Dark Mode';
+}
+toggleBtn.onclick=()=>{
+  dark=!dark;
+  applyTheme();
+};
+applyTheme();
+
+// ------------------ State ------------------
+let strings=[];          // full list [{offset,original,current}]
+let filtered=[];         // currently filtered list (search)
+let binary=null;         // Uint8Array of file
+let tableBody=document.querySelector('#stringTable tbody');
+let tableWrap=document.getElementById('tableWrap');
+const ROW_HEIGHT=28;     // px; tweak if needed
+
+// ------------------ Web Worker Setup ------------------
+const workerCode=`self.onmessage=e=>{
+  const buf=e.data;
+  const out=[];
+  const data=new Uint8Array(buf);
+  let i=0;
+  while(i<data.length){
+    const b=data[i];
+    if(b>=0x20&&b<=0x7E){
+      let start=i;
+      while(i<data.length&&data[i]>=0x20&&data[i]<=0x7E)i++;
+      if(data[i]===0x00){
+        const str=new TextDecoder('ascii').decode(data.slice(start,i));
+        out.push([start,str]);
+        i++;
+      }else{
+        i=start+1;
+      }
+    }else{
+      i++;
+    }
+  };
+  postMessage(out);
+}`;
+const blob=new Blob([workerCode],{type:'application/javascript'});
+const worker=new Worker(URL.createObjectURL(blob));
+worker.onmessage=e=>{
+  const arr=e.data;
+  strings=arr.map(([offset,str])=>({offset,original:str,current:str}));
+  document.getElementById('downloadBtn').disabled=false;
+  filterAndRender();
+};
+
+// ------------------ File Handling ------------------
+document.getElementById('fileInput').addEventListener('change',e=>{
+  const file=e.target.files[0];
+  if(!file) return;
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    binary=new Uint8Array(ev.target.result);
+    worker.postMessage(ev.target.result,[ev.target.result]);
+  };
+  reader.readAsArrayBuffer(file);
+});
+
+// ------------------ Search ------------------
+const searchInput=document.getElementById('searchInput');
+searchInput.addEventListener('input',()=>filterAndRender());
+function filterAndRender(){
+  const term=searchInput.value.toLowerCase();
+  filtered=term?strings.filter(s=>s.original.toLowerCase().includes(term)||s.current.toLowerCase().includes(term)):strings;
+  initVirtualTable();
+}
+
+// ------------------ Virtual Table Rendering ------------------
+let totalRows=0;
+function initVirtualTable(){
+  totalRows=filtered.length;
+  tableBody.innerHTML='';
+  tableBody.style.position='relative';
+  tableBody.style.height=totalRows*ROW_HEIGHT+'px';
+  renderVisibleRows();
+}
+function renderVisibleRows(){
+  const scrollTop=tableWrap.scrollTop;
+  const viewportHeight=tableWrap.clientHeight;
+  const firstRow=Math.floor(scrollTop/ROW_HEIGHT);
+  const rowsInView=Math.ceil(viewportHeight/ROW_HEIGHT)+5;
+  const start=Math.max(0,firstRow-2);
+  const end=Math.min(totalRows,start+rowsInView);
+  tableBody.innerHTML='';
+  for(let i=start;i<end;i++){
+    const entry=filtered[i];
+    const tr=document.createElement('tr');
+    tr.style.position='absolute';
+    tr.style.top=(i*ROW_HEIGHT)+'px';
+
+    const tdOffset=document.createElement('td');
+    tdOffset.textContent=entry.offset;
+    tr.appendChild(tdOffset);
+
+    const tdOrig=document.createElement('td');
+    tdOrig.textContent=entry.original;
+    tr.appendChild(tdOrig);
+
+    const tdCurr=document.createElement('td');
+    const inp=document.createElement('input');
+    inp.className='string-edit';
+    inp.value=entry.current;
+    inp.maxLength=entry.original.length;
+    inp.oninput=ev=>entry.current=ev.target.value;
+    tdCurr.appendChild(inp);
+    tr.appendChild(tdCurr);
+
+    tableBody.appendChild(tr);
+  }
+}
+tableWrap.addEventListener('scroll',renderVisibleRows);
+
+// ------------------ Download Patched File ------------------
+document.getElementById('downloadBtn').addEventListener('click',()=>{
+  if(!binary||!strings.length)return;
+  for(const s of strings){
+    if(s.current!==s.original){
+      let bytes=new TextEncoder().encode(s.current);
+      const padLen=s.original.length-bytes.length;
+      const padded=new Uint8Array([...bytes,...new Uint8Array(padLen),0]);
+      binary.set(padded,s.offset);
+    }
+  }
+  const blob=new Blob([binary],{type:'application/octet-stream'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='patched_global_metadata.dat';
+  a.click();
+});
+</script>
+</body>
+</html>
