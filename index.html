@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>IL2CPP Metadata String Editor</title>
 <style>
+  /* Same styling as before */
   body {
     margin: 0; padding: 1rem;
     background: #121212; color: #e0e0e0;
@@ -96,11 +97,22 @@
     font-family: monospace;
     font-size: 1rem;
   }
+  #cancel-button {
+    margin-top: 0.5rem;
+    display: none;
+    background: #c62828;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 0.3rem 1rem;
+    cursor: pointer;
+  }
 </style>
 </head>
 <body>
 <h1>IL2CPP Metadata String Editor</h1>
 <input type="file" id="file-input" accept=".dat" />
+<button id="cancel-button">Cancel Loading</button>
 <div id="progress-container"><div id="progress-bar">0%</div></div>
 <div id="search-container" style="display:none;">
   <input type="text" id="search-input" placeholder="Search strings (case-sensitive)" />
@@ -110,35 +122,48 @@
 <script>
 (() => {
   const fileInput = document.getElementById('file-input');
+  const cancelButton = document.getElementById('cancel-button');
   const progressContainer = document.getElementById('progress-container');
   const progressBar = document.getElementById('progress-bar');
   const stringList = document.getElementById('string-list');
   const searchContainer = document.getElementById('search-container');
   const searchInput = document.getElementById('search-input');
 
-  let entries = [];  // Array of { offset, original, current }
+  let entries = [];
+  let isCancelled = false;
+
+  cancelButton.addEventListener('click', () => {
+    isCancelled = true;
+    cancelButton.style.display = 'none';
+    progressContainer.style.display = 'none';
+    stringList.innerHTML = '<p style="text-align:center;">Loading cancelled.</p>';
+  });
 
   fileInput.addEventListener('change', () => {
     const file = fileInput.files[0];
     if (!file) return;
 
     entries = [];
+    isCancelled = false;
     stringList.innerHTML = '';
     searchInput.value = '';
     searchContainer.style.display = 'none';
     progressBar.style.width = '0%';
     progressBar.textContent = '0%';
     progressContainer.style.display = 'block';
+    cancelButton.style.display = 'inline-block';
 
     const decoder = new TextDecoder('ascii');
-    const chunkSize = 64 * 1024; // 64 KB
+    const chunkSize = 16 * 1024; // smaller chunk 16KB for better responsiveness
     let offset = 0;
     let bytes;
 
     file.arrayBuffer().then(buffer => {
       bytes = new Uint8Array(buffer);
 
-      function processChunk() {
+      async function processChunk() {
+        if (isCancelled) return;
+
         const end = Math.min(offset + chunkSize, bytes.length);
         let i = offset;
 
@@ -150,6 +175,11 @@
               const str = decoder.decode(bytes.subarray(start, i));
               if (str.length >= 3) {
                 entries.push({ offset: start, original: str, current: str });
+                // Limit total entries to 20000 for performance
+                if (entries.length >= 20000) {
+                  offset = bytes.length; // force stop
+                  break;
+                }
               }
             }
           } else {
@@ -162,17 +192,24 @@
         progressBar.style.width = percent + '%';
         progressBar.textContent = percent + '%';
 
-        if (offset < bytes.length) {
-          setTimeout(processChunk, 0);
+        // Render in small batches every chunk processed, but only first 1000 entries to avoid freezing UI
+        if (offset % (chunkSize * 4) === 0 || offset >= bytes.length) {
+          renderEntries(entries.slice(0, 1000));
+        }
+
+        if (offset < bytes.length && !isCancelled) {
+          await new Promise(r => setTimeout(r, 0)); // yield UI thread
+          processChunk();
         } else {
           progressBar.style.width = '100%';
-          progressBar.textContent = 'Done';
+          progressBar.textContent = isCancelled ? 'Cancelled' : 'Done';
           progressContainer.style.display = 'none';
+          cancelButton.style.display = 'none';
 
-          if (entries.length === 0) {
+          if (entries.length === 0 && !isCancelled) {
             stringList.innerHTML = '<p style="text-align:center;">No strings found.</p>';
-          } else {
-            renderEntries(entries);
+          } else if (!isCancelled) {
+            renderEntries(entries.slice(0, 1000));
             searchContainer.style.display = 'block';
           }
         }
@@ -224,7 +261,7 @@
   searchInput.addEventListener('input', () => {
     const term = searchInput.value;
     const filtered = entries.filter(e => e.current.includes(term));
-    renderEntries(filtered);
+    renderEntries(filtered.slice(0, 1000)); // cap at 1000 for performance
   });
 })();
 </script>
