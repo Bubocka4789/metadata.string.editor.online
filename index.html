@@ -68,7 +68,7 @@
   <input type="text" id="search" placeholder="Case-sensitive search..." />
   <button id="saveBtn" disabled>Save Modified File</button>
   <div id="progressBar"><div></div></div>
-  <div id="version">v1.0.0</div>
+  <div id="version">v1.0.1</div>
 </header>
 <div id="container">
   <div id="stringsTable">
@@ -101,6 +101,23 @@
     progressBar.style.width = Math.floor(ratio * 100) + '%';
   }
 
+  // Basic UTF-8 printable check for fallback scan
+  function isPrintableUtf8Char(code) {
+    return (code >= 32 && code <= 126) || // Basic ASCII printable
+           (code >= 160 && code <= 255);   // Extended Latin-1 printable
+  }
+
+  // Decode strings safely; replace invalid with �
+  function decodeUtf8Safe(bytes) {
+    try {
+      return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    } catch {
+      // fallback - decode replacing errors with �
+      return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+    }
+  }
+
+  // Update the visible table based on search filter and current stringLiterals
   function updateTable() {
     const filter = searchInput.value;
     tableBody.innerHTML = '';
@@ -130,26 +147,36 @@
     tableBody.appendChild(fragment);
   }
 
+  // Save modified strings back into the file buffer with correct logic
   function saveModifiedFile() {
     let newBuffer = new Uint8Array(arrayBuffer);
-    let dataView = new DataView(newBuffer.buffer);
+    let dv = new DataView(newBuffer.buffer);
     let dataEnd = stringLiteralDataOffset + stringLiteralDataSize;
+
     for (const s of stringLiterals) {
       if (s.modified === s.original) continue;
       const encoded = new TextEncoder().encode(s.modified);
       if (encoded.length <= s.length) {
+        // Overwrite in-place with padding zeros
         for (let i = 0; i < encoded.length; i++) newBuffer[s.offset + i] = encoded[i];
         for (let i = encoded.length; i < s.length; i++) newBuffer[s.offset + i] = 0;
       } else {
-        // Append to end
+        // Append to end and update pointer and length in string literal table
+        // Note: This assumes offset stored is relative to stringLiteralDataOffset
         const newOffset = dataEnd;
         for (let i = 0; i < encoded.length; i++) newBuffer[newOffset + i] = encoded[i];
         dataEnd += encoded.length;
-        // Update offset and length in string literal table
-        dataView.setUint32(stringLiteralOffset + s.index * 8, newOffset - stringLiteralDataOffset, true);
-        dataView.setUint32(stringLiteralOffset + s.index * 8 + 4, encoded.length, true);
+
+        // Update string literal table entry offset and length
+        dv.setUint32(stringLiteralOffset + s.index * 8, newOffset - stringLiteralDataOffset, true);
+        dv.setUint32(stringLiteralOffset + s.index * 8 + 4, encoded.length, true);
+
+        // Update local tracking
+        s.offset = newOffset;
+        s.length = encoded.length;
       }
     }
+
     const blob = new Blob([newBuffer.slice(0, dataEnd)], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -159,54 +186,148 @@
     URL.revokeObjectURL(url);
   }
 
+  // Fallback brute-force UTF-8 string scanner for fallback
+  async function bruteForceUtf8Scan(minLength = 4) {
+    const u8 = new Uint8Array(arrayBuffer);
+    const results = [];
+    let start = -1;
+    for (let i = 0; i < u8.length; i++) {
+      if (isPrintableUtf8Char(u8[i])) {
+        if (start === -1) start = i;
+      } else {
+        if (start !== -1) {
+          const length = i - start;
+          if (length >= minLength) {
+            const bytes = u8.slice(start, i);
+            const text = decodeUtf8Safe(bytes);
+            // Filter out strings with control chars or weird data
+            if (/^[\w\s!@#$%^&*()_+\-=[\]{}|;:'",.<>/?`~]+$/.test(text)) {
+              results.push({ index: results.length, offset: start, length, original: text, modified: text });
+            }
+          }
+          start = -1;
+        }
+      }
+      if (i % 100000 === 0) {
+        updateProgress(i / u8.length);
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
+    updateProgress(1);
+    return results;
+  }
+
+  // Try to parse string literals from metadata table with version 29 offsets
   async function parseStringLiterals() {
     const u8 = new Uint8Array(arrayBuffer);
     dataView = new DataView(arrayBuffer);
     // Check magic number
     const magic = dataView.getUint32(0, true);
     if (magic !== 0xFAB11BAF) {
-      alert('Invalid global-metadata.dat file.');
-      return;
+      alert('Invalid global-metadata.dat file (bad magic number).');
+      return false;
     }
-    // Read header to get offsets
+
+    // Read metadata header offsets for string literals
     stringLiteralOffset = dataView.getUint32(0x58, true);
     stringLiteralCount = dataView.getUint32(0x5C, true);
     stringLiteralDataOffset = dataView.getUint32(0x60, true);
     stringLiteralDataSize = dataView.getUint32(0x64, true);
+
+    // Sanity checks
+    if (stringLiteralOffset <= 0 || stringLiteralCount <= 0 || stringLiteralDataOffset <= 0 || stringLiteralDataSize <= 0) {
+      alert('Metadata header contains invalid string literal offsets/count.');
+      return false;
+    }
+    if (stringLiteralOffset + stringLiteralCount * 8 > u8.length) {
+      alert('String literal table exceeds file size.');
+      return false;
+    }
+    if (stringLiteralDataOffset + stringLiteralDataSize > u8.length) {
+      alert('String literal data region exceeds file size.');
+      return false;
+    }
+
     stringLiterals = [];
+    let validStringsCount = 0;
+
     for (let i = 0; i < stringLiteralCount; i++) {
       const entryOffset = stringLiteralOffset + i * 8;
       const relativeOffset = dataView.getUint32(entryOffset, true);
       const length = dataView.getUint32(entryOffset + 4, true);
+
+      // Skip invalid or zero length
+      if (length === 0 || relativeOffset === 0) continue;
+
       const absoluteOffset = stringLiteralDataOffset + relativeOffset;
+
+      // Bounds check
+      if (absoluteOffset + length > u8.length) continue;
+
+      // Extract bytes and decode
       const bytes = u8.slice(absoluteOffset, absoluteOffset + length);
-      const text = new TextDecoder().decode(bytes);
-      stringLiterals.push({ index: i, offset: absoluteOffset, length, original: text, modified: text });
-      if (i % 100 === 0) {
+      const text = decodeUtf8Safe(bytes);
+
+      // Filter out empty or non-printable strings (allow spaces!)
+      if (!text || text.trim().length === 0) continue;
+
+      // Filter out strings with control characters except \t and space
+      if (/[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(text)) continue;
+
+      stringLiterals.push({
+        index: i,
+        offset: absoluteOffset,
+        length: length,
+        original: text,
+        modified: text
+      });
+
+      validStringsCount++;
+      if (validStringsCount % 500 === 0) {
         updateProgress(i / stringLiteralCount);
         await new Promise(r => setTimeout(r, 0));
       }
     }
+
     updateProgress(1);
-    saveBtn.disabled = false;
-    updateTable();
+
+    if (stringLiterals.length === 0) {
+      // No strings found in table, fallback
+      const answer = confirm('No valid strings found in Il2Cpp string literal table.\nFallback to brute force UTF-8 scan? (This may take longer)');
+      if (answer) {
+        stringLiterals = await bruteForceUtf8Scan(4);
+      }
+    }
+    return true;
   }
 
-  fileInput.addEventListener('change', async e => {
-    if (!fileInput.files.length) return;
+  async function loadFile(file) {
     saveBtn.disabled = true;
     tableBody.innerHTML = '';
-    updateProgress(0);
-    const file = fileInput.files[0];
+    progressBar.style.width = '0%';
+    stringLiterals = [];
     arrayBuffer = await file.arrayBuffer();
-    await parseStringLiterals();
+    const ok = await parseStringLiterals();
+    if (!ok) {
+      alert('Failed to parse metadata string literals.');
+      return;
+    }
+    updateTable();
+    saveBtn.disabled = false;
+  }
+
+  fileInput.addEventListener('change', e => {
+    if (e.target.files.length === 0) return;
+    loadFile(e.target.files[0]);
   });
 
   searchInput.addEventListener('input', () => {
     updateTable();
   });
 
-  saveBtn.addEventListener('click', saveModifiedFile);
+  saveBtn.addEventListener('click', () => {
+    saveModifiedFile();
+  });
 })();
 </script>
 </body>
