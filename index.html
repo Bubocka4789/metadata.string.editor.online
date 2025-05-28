@@ -144,211 +144,254 @@
   </div>
   <div id="string-list" aria-live="polite" aria-relevant="additions"></div>
 
-  <script>
-    const fileInput = document.getElementById('file-input');
-    const progressBar = document.getElementById('progress-bar');
-    const progressContainer = document.getElementById('progress-container');
-    const stringList = document.getElementById('string-list');
-    const searchInput = document.getElementById('search');
-    const downloadBtn = document.getElementById('download-btn');
+<script>
+  const fileInput = document.getElementById('file-input');
+  const progressBar = document.getElementById('progress-bar');
+  const progressContainer = document.getElementById('progress-container');
+  const stringList = document.getElementById('string-list');
+  const searchInput = document.getElementById('search');
+  const downloadBtn = document.getElementById('download-btn');
 
-    let entries = [];
-    let buffer = null;
+  let entries = [];
+  let buffer = null;
 
-    fileInput.addEventListener('change', () => {
-      const file = fileInput.files[0];
-      if (!file) return;
-
-      entries = [];
-      stringList.innerHTML = '';
-      progressContainer.style.display = 'block';
-      updateProgress(0);
-
-      const reader = new FileReader();
-      reader.onload = () => {
-        buffer = new Uint8Array(reader.result);
-        extractStrings(buffer, (results) => {
-          entries = results;
-          renderEntries(entries);
-          updateProgress(100);
-          setTimeout(() => {
-            progressContainer.style.display = 'none';
-          }, 400);
-        });
-      };
-      reader.readAsArrayBuffer(file);
-    });
-
-    // Updates progress bar UI
-    function updateProgress(percent) {
-      progressBar.style.width = percent + '%';
-      progressBar.textContent = percent + '%';
-      progressContainer.setAttribute('aria-valuenow', percent);
-    }
-
-    // Ultra-safe extractStrings function with chunked async processing to avoid freezing
-    function extractStrings(buf, callback) {
+  // Inline worker code as a blob
+  const workerCode = `
+    self.onmessage = function(e) {
+      const buf = new Uint8Array(e.data);
       const strings = [];
       const minLength = 3;
       const decoder = new TextDecoder('ascii');
-      const chunkSize = 5000; // smaller chunks for frequent yielding
+      const length = buf.length;
+
       let i = 0;
+      const maxStringLength = 1000;
 
-      // Async helper to scan a single string safely by yielding after every 200 chars
-      function scanString(start) {
-        return new Promise(resolve => {
-          let j = start;
-          function innerScan() {
-            let count = 0;
-            while (j < buf.length && buf[j] >= 0x20 && buf[j] <= 0x7E) {
-              j++;
-              count++;
-              if (count >= 200) {
-                setTimeout(innerScan, 0);
-                return;
-              }
-            }
-            resolve(j);
-          }
-          innerScan();
-        });
+      function isPrintable(byte) {
+        return byte >= 0x20 && byte <= 0x7E;
       }
 
-      function processChunk() {
-        if (i >= buf.length) {
-          callback(strings);
-          return;
+      while (i < length) {
+        if (isPrintable(buf[i])) {
+          const start = i;
+          let strLen = 0;
+          while (i < length && isPrintable(buf[i]) && strLen < maxStringLength) {
+            i++;
+            strLen++;
+          }
+          if (i === length || buf[i] === 0x00) {
+            if (strLen >= minLength) {
+              const str = decoder.decode(buf.slice(start, start + strLen));
+              strings.push({ offset: start, original: str, current: str });
+            }
+            if (i < length && buf[i] === 0x00) i++;
+          }
+        } else {
+          i++;
         }
-        const end = Math.min(i + chunkSize, buf.length);
-
-        (async function process() {
-          while (i < end) {
-            if (buf[i] >= 0x20 && buf[i] <= 0x7E) {
-              const start = i;
-              const j = await scanString(start);
-              if (j === buf.length || buf[j] === 0x00) {
-                const str = decoder.decode(buf.slice(start, j));
-                if (str.length >= minLength) {
-                  strings.push({ offset: start, original: str, current: str });
-                }
-                i = j + (j < buf.length && buf[j] === 0x00 ? 1 : 0);
-              } else {
-                i = j;
-              }
-            } else {
-              i++;
-            }
-            if (i >= end) break;
-          }
-          updateProgress(Math.floor((i / buf.length) * 100));
-          if (i < buf.length) {
-            setTimeout(processChunk, 0);
-          } else {
-            callback(strings);
-          }
-        })();
+        if (i % 500000 === 0) {
+          self.postMessage({ progress: Math.floor((i / length) * 100) });
+        }
       }
+      self.postMessage({ progress: 100, strings });
+      self.close();
+    };
+  `;
 
-      processChunk();
-    }
+  const workerBlob = new Blob([workerCode], { type: 'application/javascript' });
+  const workerURL = URL.createObjectURL(workerBlob);
 
-    // Render string entries with original and editable modified inputs
-    function renderEntries(list) {
-      stringList.innerHTML = '';
-      if (list.length === 0) {
-        stringList.textContent = 'No strings found.';
-        return;
-      }
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files[0];
+    if (!file) return;
 
-      const fragment = document.createDocumentFragment();
+    entries = [];
+    stringList.innerHTML = '';
+    progressContainer.style.display = 'block';
+    updateProgress(0);
 
-      list.forEach((entry) => {
-        const div = document.createElement('div');
-        div.className = 'string-item';
-
-        const label = document.createElement('div');
-        label.className = 'string-label';
-        label.textContent = `[0x${entry.offset.toString(16).toUpperCase().padStart(8, '0')}]`;
-
-        const originalCol = document.createElement('div');
-        originalCol.className = 'string-col';
-        const originalLabel = document.createElement('label');
-        originalLabel.textContent = 'Original';
-        const originalInput = document.createElement('input');
-        originalInput.type = 'text';
-        originalInput.value = entry.original;
-        originalInput.readOnly = true;
-        originalInput.setAttribute('aria-label', `Original string at offset 0x${entry.offset.toString(16)}`);
-        originalCol.appendChild(originalLabel);
-        originalCol.appendChild(originalInput);
-
-        const modifiedCol = document.createElement('div');
-        modifiedCol.className = 'string-col';
-        const modifiedLabel = document.createElement('label');
-        modifiedLabel.textContent = 'Modified';
-        const modifiedInput = document.createElement('input');
-        modifiedInput.type = 'text';
-        modifiedInput.value = entry.current;
-        modifiedInput.maxLength = entry.original.length;
-        modifiedInput.setAttribute('aria-label', `Modified string at offset 0x${entry.offset.toString(16)}`);
-
-        modifiedInput.addEventListener('input', () => {
-          let filtered = modifiedInput.value.replace(/[^\x20-\x7E]/g, '');
-          if (filtered.length > entry.original.length) {
-            filtered = filtered.slice(0, entry.original.length);
-          }
-          modifiedInput.value = filtered;
-          entry.current = filtered;
-        });
-
-        modifiedCol.appendChild(modifiedLabel);
-        modifiedCol.appendChild(modifiedInput);
-
-        div.appendChild(label);
-        div.appendChild(originalCol);
-        div.appendChild(modifiedCol);
-
-        fragment.appendChild(div);
-      });
-
-      stringList.appendChild(fragment);
-    }
-
-    // Filter rendered entries based on search input
-    searchInput.addEventListener('input', () => {
-      const query = searchInput.value.trim().toLowerCase();
-      if (!query) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      buffer = new Uint8Array(reader.result);
+      extractStrings(buffer.buffer, (results) => {
+        entries = results;
         renderEntries(entries);
-        return;
+        updateProgress(100);
+        setTimeout(() => {
+          progressContainer.style.display = 'none';
+        }, 400);
+      });
+    };
+    reader.readAsArrayBuffer(file);
+  });
+
+  function updateProgress(percent) {
+    progressBar.style.width = percent + '%';
+    progressBar.textContent = percent + '%';
+    progressContainer.setAttribute('aria-valuenow', percent);
+  }
+
+  function extractStrings(arrayBuffer, callback) {
+    if (window.Worker) {
+      const worker = new Worker(workerURL);
+      worker.postMessage(arrayBuffer, [arrayBuffer]);
+
+      worker.onmessage = function (e) {
+        if (e.data.progress !== undefined) {
+          updateProgress(e.data.progress);
+        }
+        if (e.data.strings) {
+          callback(e.data.strings);
+        }
+      };
+
+      worker.onerror = function (error) {
+        console.error('Worker error:', error);
+        callback([]); // fallback empty
+      };
+    } else {
+      // Fallback: do a very slow synchronous extraction to avoid freezing (if no worker support)
+      fallbackExtract(new Uint8Array(arrayBuffer), callback);
+    }
+  }
+
+  // Fallback extraction (very slow, but safe)
+  function fallbackExtract(buf, callback) {
+    const strings = [];
+    const minLength = 3;
+    const decoder = new TextDecoder('ascii');
+    let i = 0;
+
+    function isPrintable(byte) {
+      return byte >= 0x20 && byte <= 0x7E;
+    }
+
+    function processChunk() {
+      const chunkSize = 10000;
+      const end = Math.min(i + chunkSize, buf.length);
+
+      while (i < end) {
+        if (isPrintable(buf[i])) {
+          const start = i;
+          while (i < buf.length && isPrintable(buf[i])) i++;
+
+          if (i === buf.length || buf[i] === 0x00) {
+            const str = decoder.decode(buf.slice(start, i));
+            if (str.length >= minLength) {
+              strings.push({ offset: start, original: str, current: str });
+            }
+            if (i < buf.length && buf[i] === 0x00) i++;
+          }
+        } else {
+          i++;
+        }
       }
-      const filtered = entries.filter(e =>
-        e.original.toLowerCase().includes(query) || e.current.toLowerCase().includes(query)
-      );
-      renderEntries(filtered);
-    });
 
-    // Download the buffer with modifications applied
-    downloadBtn.addEventListener('click', () => {
-      if (!buffer || entries.length === 0) return;
+      updateProgress(Math.floor((i / buf.length) * 100));
 
-      const updated = new Uint8Array(buffer); // copy original buffer
-      entries.forEach(e => {
-        // Pad modified string with null bytes to maintain original length
-        const enc = new TextEncoder().encode(e.current.padEnd(e.original.length, '\0'));
-        updated.set(enc.slice(0, e.original.length), e.offset);
+      if (i < buf.length) {
+        setTimeout(processChunk, 0);
+      } else {
+        callback(strings);
+      }
+    }
+
+    processChunk();
+  }
+
+  function renderEntries(list) {
+    stringList.innerHTML = '';
+    if (list.length === 0) {
+      stringList.textContent = 'No strings found.';
+      return;
+    }
+
+    const fragment = document.createDocumentFragment();
+
+    list.forEach((entry) => {
+      const div = document.createElement('div');
+      div.className = 'string-item';
+
+      const label = document.createElement('div');
+      label.className = 'string-label';
+      label.textContent = `[0x${entry.offset.toString(16).toUpperCase().padStart(8, '0')}]`;
+
+      const originalCol = document.createElement('div');
+      originalCol.className = 'string-col';
+      const originalLabel = document.createElement('label');
+      originalLabel.textContent = 'Original';
+      const originalInput = document.createElement('input');
+      originalInput.type = 'text';
+      originalInput.value = entry.original;
+      originalInput.readOnly = true;
+      originalInput.setAttribute('aria-label', `Original string at offset 0x${entry.offset.toString(16)}`);
+      originalCol.appendChild(originalLabel);
+      originalCol.appendChild(originalInput);
+
+      const modifiedCol = document.createElement('div');
+      modifiedCol.className = 'string-col';
+      const modifiedLabel = document.createElement('label');
+      modifiedLabel.textContent = 'Modified';
+      const modifiedInput = document.createElement('input');
+      modifiedInput.type = 'text';
+      modifiedInput.value = entry.current;
+      modifiedInput.maxLength = entry.original.length;
+      modifiedInput.setAttribute('aria-label', `Modified string at offset 0x${entry.offset.toString(16)}`);
+
+      modifiedInput.addEventListener('input', () => {
+        let filtered = modifiedInput.value.replace(/[^\x20-\x7E]/g, '');
+        if (filtered.length > entry.original.length) {
+          filtered = filtered.slice(0, entry.original.length);
+        }
+        modifiedInput.value = filtered;
+        entry.current = filtered;
       });
 
-      const blob = new Blob([updated], { type: 'application/octet-stream' });
-      const url = URL.createObjectURL(blob);
+      modifiedCol.appendChild(modifiedLabel);
+      modifiedCol.appendChild(modifiedInput);
 
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'modified-metadata.dat';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      div.appendChild(label);
+      div.appendChild(originalCol);
+      div.appendChild(modifiedCol);
+
+      fragment.appendChild(div);
     });
-  </script>
+
+    stringList.appendChild(fragment);
+  }
+
+  searchInput.addEventListener('input', () => {
+    const query = searchInput.value.trim().toLowerCase();
+    if (!query) {
+      renderEntries(entries);
+      return;
+    }
+    const filtered = entries.filter(e =>
+      e.original.toLowerCase().includes(query) || e.current.toLowerCase().includes(query)
+    );
+    renderEntries(filtered);
+  });
+
+  downloadBtn.addEventListener('click', () => {
+    if (!buffer || entries.length === 0) return;
+
+    const updated = new Uint8Array(buffer); // copy original buffer
+    entries.forEach(e => {
+      const enc = new TextEncoder().encode(e.current.padEnd(e.original.length, '\0'));
+      updated.set(enc.slice(0, e.original.length), e.offset);
+    });
+
+    const blob = new Blob([updated], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'modified-metadata.dat';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+</script>
 </body>
 </html>
