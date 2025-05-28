@@ -1,183 +1,187 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>High-Performance .DAT String Editor</title>
+  <meta charset="UTF-8">
+  <title>Metadata String Editor</title>
   <style>
     body {
       font-family: sans-serif;
-      background: #111;
+      background: #121212;
       color: #eee;
       margin: 0;
       padding: 1rem;
     }
-    h1 {
-      text-align: center;
-    }
+    h1 { text-align: center; }
     #controls {
       display: flex;
+      gap: 1rem;
       flex-wrap: wrap;
       justify-content: center;
-      gap: 1rem;
       margin-bottom: 1rem;
     }
     input, button {
       padding: 0.5rem;
       background: #222;
-      border: 1px solid #444;
-      color: #eee;
-      border-radius: 5px;
-    }
-    #progress {
-      width: 100%;
-      height: 20px;
-      background: #333;
-      border-radius: 10px;
-      overflow: hidden;
-      margin-bottom: 1rem;
-    }
-    #progress-bar {
-      height: 100%;
-      width: 0;
-      background: #4caf50;
-      transition: width 0.1s;
+      border: 1px solid #555;
+      color: #fff;
+      border-radius: 4px;
     }
     #list {
       max-height: 70vh;
       overflow-y: auto;
       border: 1px solid #333;
-      padding: 0.5rem;
+      padding: 1rem;
+      background: #1e1e1e;
     }
     .entry {
-      background: #1a1a1a;
-      border-radius: 5px;
-      padding: 0.5rem;
-      margin-bottom: 0.5rem;
+      display: flex;
+      flex-wrap: wrap;
+      margin-bottom: 0.75rem;
+      border-bottom: 1px solid #333;
+      padding-bottom: 0.5rem;
     }
     .entry input {
       width: 100%;
       font-family: monospace;
-      background: #000;
-      border: 1px solid #333;
-      color: #ccc;
+      margin-top: 0.25rem;
+    }
+    .label {
+      flex-basis: 100%;
+      font-size: 0.85rem;
+      margin-bottom: 0.25rem;
+      color: #90caf9;
+    }
+    .col {
+      flex: 1;
+      margin-right: 1rem;
     }
   </style>
 </head>
 <body>
-  <h1>.DAT String Editor (No Freeze)</h1>
+  <h1>Metadata String Editor</h1>
   <div id="controls">
     <input type="file" id="fileInput" accept=".dat">
-    <input type="text" id="search" placeholder="Case-sensitive search...">
-    <button id="download">Download</button>
+    <input type="text" id="searchInput" placeholder="Search (case-sensitive)">
+    <button id="downloadBtn">Download</button>
   </div>
-  <div id="progress"><div id="progress-bar"></div></div>
   <div id="list"></div>
 
   <script>
     const fileInput = document.getElementById('fileInput');
     const list = document.getElementById('list');
-    const progressBar = document.getElementById('progress-bar');
-    const search = document.getElementById('search');
-    const download = document.getElementById('download');
+    const searchInput = document.getElementById('searchInput');
+    const downloadBtn = document.getElementById('downloadBtn');
 
     let entries = [];
-    let originalBuffer = null;
+    let originalBuffer;
 
-    fileInput.addEventListener('change', () => {
+    fileInput.addEventListener('change', async () => {
       const file = fileInput.files[0];
       if (!file) return;
+
+      const arrayBuffer = await file.arrayBuffer();
+      originalBuffer = new Uint8Array(arrayBuffer);
+      entries = extractStringsFromMetadata(originalBuffer);
+      renderEntries(entries);
+    });
+
+    function extractStringsFromMetadata(buf) {
+      const dv = new DataView(buf.buffer);
+      const count = dv.getUint32(0x0010, true); // string literal count
+      const literalOffset = dv.getUint32(0x0014, true); // literal data start
+      const metadataSize = dv.getUint32(0x0004, true);
+
+      const strings = [];
+      for (let i = 0; i < count; i++) {
+        const offset = dv.getUint32(0x0018 + i * 4, true);
+        let str = '';
+        let ptr = offset;
+
+        while (ptr < buf.length && buf[ptr] !== 0) {
+          str += String.fromCharCode(buf[ptr]);
+          ptr++;
+        }
+
+        strings.push({
+          index: i,
+          offset,
+          original: str,
+          current: str
+        });
+      }
+      return strings;
+    }
+
+    function renderEntries(data) {
       list.innerHTML = '';
-      entries = [];
-      readFileInChunks(file);
+      const fragment = document.createDocumentFragment();
+
+      for (const entry of data) {
+        const container = document.createElement('div');
+        container.className = 'entry';
+
+        const label = document.createElement('div');
+        label.className = 'label';
+        label.textContent = `[Offset 0x${entry.offset.toString(16)}]`;
+
+        const originalCol = document.createElement('div');
+        originalCol.className = 'col';
+        const origLabel = document.createElement('label');
+        origLabel.textContent = 'Original';
+        const origInput = document.createElement('input');
+        origInput.type = 'text';
+        origInput.value = entry.original;
+        origInput.readOnly = true;
+        originalCol.appendChild(origLabel);
+        originalCol.appendChild(origInput);
+
+        const modCol = document.createElement('div');
+        modCol.className = 'col';
+        const modLabel = document.createElement('label');
+        modLabel.textContent = 'Modified';
+        const modInput = document.createElement('input');
+        modInput.type = 'text';
+        modInput.value = entry.current;
+        modInput.maxLength = entry.original.length;
+        modInput.addEventListener('input', () => {
+          modInput.value = modInput.value.replace(/[^\x20-\x7E]/g, '').slice(0, entry.original.length);
+          entry.current = modInput.value;
+        });
+        modCol.appendChild(modLabel);
+        modCol.appendChild(modInput);
+
+        container.appendChild(label);
+        container.appendChild(originalCol);
+        container.appendChild(modCol);
+        fragment.appendChild(container);
+      }
+
+      list.appendChild(fragment);
+    }
+
+    searchInput.addEventListener('input', () => {
+      const query = searchInput.value;
+      if (!query) return renderEntries(entries);
+      const filtered = entries.filter(e => e.original.includes(query) || e.current.includes(query));
+      renderEntries(filtered);
     });
 
-    search.addEventListener('input', () => {
-      const term = search.value;
-      document.querySelectorAll('.entry').forEach(e => {
-        const original = e.dataset.original;
-        const modified = e.querySelector('input').value;
-        e.style.display = (original.includes(term) || modified.includes(term)) ? '' : 'none';
-      });
-    });
+    downloadBtn.addEventListener('click', () => {
+      if (!originalBuffer || entries.length === 0) return;
 
-    download.addEventListener('click', () => {
-      const modifiedBuffer = new Uint8Array(originalBuffer);
-      entries.forEach(e => {
-        const encoded = new TextEncoder().encode(e.modified.padEnd(e.original.length, '\0'));
-        modifiedBuffer.set(encoded.slice(0, e.original.length), e.offset);
-      });
-      const blob = new Blob([modifiedBuffer], { type: 'application/octet-stream' });
+      const updated = new Uint8Array(originalBuffer);
+      for (const entry of entries) {
+        const enc = new TextEncoder().encode(entry.current.padEnd(entry.original.length, '\0'));
+        updated.set(enc.slice(0, entry.original.length), entry.offset);
+      }
+
+      const blob = new Blob([updated], { type: 'application/octet-stream' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = 'modified.dat';
+      a.download = 'modified-metadata.dat';
       a.click();
       URL.revokeObjectURL(a.href);
     });
-
-    function readFileInChunks(file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        originalBuffer = new Uint8Array(reader.result);
-        extractStringsIncrementally(originalBuffer);
-      };
-      reader.readAsArrayBuffer(file);
-    }
-
-    function extractStringsIncrementally(buffer) {
-      const decoder = new TextDecoder('ascii');
-      const minLen = 3;
-      let i = 0;
-      const CHUNK_SIZE = 100000;
-
-      function step() {
-        const end = Math.min(i + CHUNK_SIZE, buffer.length);
-        while (i < end) {
-          if (buffer[i] >= 32 && buffer[i] <= 126) {
-            const start = i;
-            while (i < buffer.length && buffer[i] >= 32 && buffer[i] <= 126) i++;
-            if (i === buffer.length || buffer[i] === 0x00) {
-              const str = decoder.decode(buffer.slice(start, i));
-              if (str.length >= minLen) {
-                const offset = start;
-                entries.push({ offset, original: str, modified: str });
-                addEntry(offset, str);
-              }
-              if (buffer[i] === 0x00) i++;
-            }
-          } else {
-            i++;
-          }
-        }
-        const percent = Math.floor((i / buffer.length) * 100);
-        progressBar.style.width = percent + '%';
-        if (i < buffer.length) {
-          setTimeout(step, 0);
-        } else {
-          progressBar.style.width = '100%';
-        }
-      }
-      step();
-    }
-
-    function addEntry(offset, str) {
-      const div = document.createElement('div');
-      div.className = 'entry';
-      div.dataset.original = str;
-      div.innerHTML = `
-        <div><b>0x${offset.toString(16).toUpperCase()}</b></div>
-        <div>Original: <code>${str}</code></div>
-        <div>Modified: <input type="text" value="${str}" /></div>
-      `;
-      const input = div.querySelector('input');
-      input.maxLength = str.length;
-      input.addEventListener('input', () => {
-        const entry = entries.find(e => e.offset === offset);
-        entry.modified = input.value.replace(/[^\x20-\x7E]/g, '').slice(0, entry.original.length);
-        input.value = entry.modified;
-      });
-      list.appendChild(div);
-    }
   </script>
 </body>
 </html>
