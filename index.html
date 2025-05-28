@@ -1,153 +1,365 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>global-metadata.dat String Editor</title>
-  <style>
-    body { background: #121212; color: #eee; font-family: sans-serif; margin: 0; padding: 1rem; }
-    h1 { text-align: center; }
-    #controls { display: flex; justify-content: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1rem; }
-    #controls input, #controls button {
-      background: #222; color: white; border: 1px solid #555;
-      padding: 0.5rem; border-radius: 4px;
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>MetaDataStringEditor Web Clone</title>
+<style>
+  body {
+    margin:0; font-family: system-ui, sans-serif; background:#121212; color:#e0e0e0; padding:1rem; display:flex; flex-direction: column; min-height:100vh;
+  }
+  h1 { text-align:center; margin-bottom:1rem; }
+  #controls {
+    display:flex; gap:1rem; flex-wrap: wrap; justify-content:center; margin-bottom:1rem;
+  }
+  input[type="file"],
+  input[type="text"],
+  button {
+    background:#000; color:#eee; border:1px solid #555; border-radius:4px; padding:0.4rem 0.6rem; font-size:1rem; outline-offset:2px; transition: border-color 0.2s ease;
+  }
+  input[type="file"]:focus,
+  input[type="text"]:focus,
+  button:focus {
+    border-color:#4caf50;
+  }
+  #progress-container {
+    display:none; width:100%; max-width:600px; margin:0 auto 1rem auto; background:#333; border-radius:8px; overflow:hidden; height:20px;
+  }
+  #progress-bar {
+    height:100%; width:0%; background:#4caf50; text-align:center; color:#fff; font-weight:bold; line-height:20px; user-select:none; transition: width 0.2s ease; font-size:0.9rem;
+  }
+  #string-list {
+    max-height: 60vh; overflow-y:auto; border:1px solid #444; border-radius:6px; padding:0.5rem; background:#1e1e1e; flex-grow:1; user-select:text;
+  }
+  .string-item {
+    background:#2a2a2a; padding:0.5rem; border-radius:4px; margin-bottom:0.5rem; display:flex; gap:1rem; align-items:center; flex-wrap: wrap;
+  }
+  .string-label {
+    flex-basis: 100%; color:#90caf9; font-size:0.85rem; margin-bottom:0.25rem; font-family: monospace; user-select:text;
+  }
+  .string-col {
+    flex:1 1 45%; display:flex; flex-direction: column; min-width:200px;
+  }
+  .string-col label {
+    font-size: 0.75rem; margin-bottom: 0.15rem; color: #bbb; user-select:none;
+  }
+  .string-col input {
+    width: 100%; font-family: monospace; font-size: 1rem; background: #000; border: 1px solid #555; border-radius: 4px; color: #eee; padding: 0.3rem 0.5rem; transition: border-color 0.2s ease;
+  }
+  .string-col input:focus {
+    border-color: #4caf50; outline: none;
+  }
+  .string-col input[readonly] {
+    background: #222; color: #777; cursor: default;
+  }
+  @media (max-width: 600px) {
+    .string-col {
+      flex-basis: 100%;
     }
-    #progress-bar { width: 100%; height: 20px; background: #333; margin-bottom: 1rem; border-radius: 4px; overflow: hidden; }
-    #progress { height: 100%; background: #4caf50; width: 0%; text-align: center; line-height: 20px; color: white; }
-    #string-list { max-height: 70vh; overflow-y: auto; border: 1px solid #333; padding: 1rem; background: #1e1e1e; }
-    .entry { border-bottom: 1px solid #444; padding: 0.5rem 0; }
-    .entry input { width: 100%; background: #111; color: #eee; border: 1px solid #555; margin-top: 0.25rem; padding: 0.3rem; }
-    .label { color: #aaa; font-size: 0.85rem; }
-  </style>
+  }
+</style>
 </head>
 <body>
-  <h1>global-metadata.dat Editor</h1>
+  <h1>MetaDataStringEditor Web Clone</h1>
   <div id="controls">
-    <input type="file" id="fileInput" accept=".dat" />
-    <input type="text" id="searchInput" placeholder="Search (case-sensitive)">
-    <button id="downloadBtn">Download Modified</button>
+    <input type="file" id="file-input" accept=".dat" aria-label="Load global-metadata.dat file" />
+    <input type="text" id="search" placeholder="Search (case-sensitive)..." aria-label="Search strings" />
+    <button id="download-btn" aria-label="Download modified file">Download</button>
   </div>
-  <div id="progress-bar"><div id="progress">0%</div></div>
-  <div id="string-list"></div>
+  <div id="progress-container" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+    <div id="progress-bar">0%</div>
+  </div>
+  <div id="string-list" aria-live="polite" aria-relevant="additions"></div>
 
-  <script>
-    const fileInput = document.getElementById('fileInput');
-    const progress = document.getElementById('progress');
-    const list = document.getElementById('string-list');
-    const searchInput = document.getElementById('searchInput');
-    const downloadBtn = document.getElementById('downloadBtn');
+<script>
+(() => {
+  const fileInput = document.getElementById('file-input');
+  const progressBar = document.getElementById('progress-bar');
+  const progressContainer = document.getElementById('progress-container');
+  const stringList = document.getElementById('string-list');
+  const searchInput = document.getElementById('search');
+  const downloadBtn = document.getElementById('download-btn');
 
-    let buffer = null;
-    let entries = [];
+  let buffer = null;
+  let entries = []; // { offset, length, original, current }
+  let filteredEntries = [];
+  let fileSize = 0;
 
-    fileInput.addEventListener('change', async () => {
-      const file = fileInput.files[0];
-      if (!file) return;
-      const arrayBuffer = await file.arrayBuffer();
-      buffer = new Uint8Array(arrayBuffer);
-      entries = [];
+  // Util: read UInt32 LE
+  function readUint32LE(data, offset) {
+    return data[offset] | (data[offset+1]<<8) | (data[offset+2]<<16) | (data[offset+3]<<24);
+  }
 
-      list.innerHTML = '';
-      updateProgress(0);
-      extractStrings(buffer);
-    });
+  // Update progress UI
+  function updateProgress(percent) {
+    progressBar.style.width = percent + '%';
+    progressBar.textContent = percent + '%';
+    progressContainer.setAttribute('aria-valuenow', percent);
+  }
 
-    function updateProgress(p) {
-      progress.style.width = p + '%';
-      progress.textContent = p + '%';
+  // Parse metadata header and Il2CppStringLiteral table offsets
+  // Header format:
+  // uint32_t stringLiteralCount @ offset 0xC
+  // uint32_t stringLiteralOffset @ offset 0x10
+  function parseMetadataHeader(data) {
+    if (data.length < 0x14) throw new Error('File too small for metadata header');
+    const stringLiteralCount = readUint32LE(data, 0xC);
+    const stringLiteralOffset = readUint32LE(data, 0x10);
+    if (stringLiteralOffset + stringLiteralCount * 8 > data.length) {
+      throw new Error('Invalid string literal table offsets');
     }
+    return { stringLiteralCount, stringLiteralOffset };
+  }
 
-    function extractStrings(buf) {
-      const decoder = new TextDecoder("ascii");
-      const minLen = 3;
-      const chunkSize = 100000;
-      let i = 0;
-
-      function processChunk() {
-        const startTime = performance.now();
-        while (i < buf.length) {
-          if (buf[i] >= 0x20 && buf[i] <= 0x7E) {
-            const start = i;
-            while (i < buf.length && buf[i] >= 0x20 && buf[i] <= 0x7E) i++;
-            if (i === buf.length || buf[i] === 0x00) {
-              const str = decoder.decode(buf.slice(start, i));
-              if (str.length >= minLen) {
-                const entry = { offset: start, original: str, current: str };
-                entries.push(entry);
-                renderEntry(entry);
-              }
-              if (buf[i] === 0x00) i++;
-            }
-          } else {
-            i++;
-          }
-
-          if (i % chunkSize === 0 || performance.now() - startTime > 50) {
-            updateProgress(Math.floor((i / buf.length) * 100));
-            return setTimeout(processChunk, 0);
-          }
-        }
-
-        updateProgress(100);
+  // Read the Il2CppStringLiteral entries
+  // Each entry 8 bytes: 4 bytes string offset, 4 bytes length
+  // Strings stored in data region
+  function parseStringLiterals(data, offset, count) {
+    const literals = [];
+    for(let i=0; i<count; i++) {
+      const off = readUint32LE(data, offset + i*8);
+      const len = readUint32LE(data, offset + i*8 + 4);
+      // Validate offset and length inside file
+      if (off + len > data.length) {
+        // We do not discard, but clamp length to max possible to avoid crash
+        const clampedLen = Math.max(0, data.length - off);
+        literals.push({ offset: off, length: clampedLen });
+      } else {
+        literals.push({ offset: off, length: len });
       }
+    }
+    return literals;
+  }
 
-      processChunk();
+  // Decode ASCII strings from buffer slice
+  function decodeString(data, offset, length) {
+    // Remove trailing nulls if any
+    let end = offset + length;
+    while (end > offset && data[end-1] === 0) end--;
+    return new TextDecoder('ascii').decode(data.subarray(offset, end));
+  }
+
+  // Incrementally process and show strings to avoid freezes
+  function processStringsIncrementally(literals, chunkSize=200) {
+    let index = 0;
+    entries = [];
+
+    function processChunk() {
+      const end = Math.min(index + chunkSize, literals.length);
+      for (; index < end; index++) {
+        const lit = literals[index];
+        const str = decodeString(buffer, lit.offset, lit.length);
+        entries.push({
+          offset: lit.offset,
+          length: lit.length,
+          original: str,
+          current: str,
+        });
+      }
+      renderEntries(entries, searchInput.value);
+      updateProgress(Math.floor((index / literals.length) * 100));
+      if (index < literals.length) {
+        setTimeout(processChunk, 0);
+      } else {
+        updateProgress(100);
+        setTimeout(() => {
+          progressContainer.style.display = 'none';
+        }, 300);
+      }
+    }
+    progressContainer.style.display = 'block';
+    processChunk();
+  }
+
+  // Render entries filtered by search query (case-sensitive)
+  function renderEntries(list, filter='') {
+    filteredEntries = [];
+    stringList.innerHTML = '';
+    if (list.length === 0) {
+      stringList.textContent = 'No strings found.';
+      return;
     }
 
-    function renderEntry(entry) {
+    const frag = document.createDocumentFragment();
+    for (const entry of list) {
+      if (filter.length > 0) {
+        if (!entry.original.includes(filter) && !entry.current.includes(filter)) continue;
+      }
+      filteredEntries.push(entry);
+
       const div = document.createElement('div');
-      div.className = 'entry';
-      div.dataset.offset = entry.offset;
+      div.className = 'string-item';
 
       const label = document.createElement('div');
-      label.className = 'label';
-      label.textContent = `Offset 0x${entry.offset.toString(16).padStart(8, '0')}`;
+      label.className = 'string-label';
+      label.textContent = `[0x${entry.offset.toString(16).toUpperCase().padStart(8,'0')}] (len: ${entry.length})`;
 
-      const orig = document.createElement('input');
-      orig.value = entry.original;
-      orig.readOnly = true;
+      const originalCol = document.createElement('div');
+      originalCol.className = 'string-col';
+      const originalLabel = document.createElement('label');
+      originalLabel.textContent = 'Original';
+      const originalInput = document.createElement('input');
+      originalInput.type = 'text';
+      originalInput.value = entry.original;
+      originalInput.readOnly = true;
+      originalInput.setAttribute('aria-label', `Original string at offset 0x${entry.offset.toString(16)}`);
+      originalCol.appendChild(originalLabel);
+      originalCol.appendChild(originalInput);
 
-      const mod = document.createElement('input');
-      mod.value = entry.current;
-      mod.maxLength = entry.original.length;
-      mod.addEventListener('input', () => {
-        entry.current = mod.value.slice(0, entry.original.length);
+      const modifiedCol = document.createElement('div');
+      modifiedCol.className = 'string-col';
+      const modifiedLabel = document.createElement('label');
+      modifiedLabel.textContent = 'Modified';
+      const modifiedInput = document.createElement('input');
+      modifiedInput.type = 'text';
+      modifiedInput.value = entry.current;
+      modifiedInput.setAttribute('aria-label', `Modified string at offset 0x${entry.offset.toString(16)}`);
+      modifiedInput.maxLength = entry.length; // max input length is original length
+      modifiedInput.style.caretColor = '#4caf50';
+
+      // Filter input to ASCII printable chars and max length enforced
+      modifiedInput.addEventListener('input', () => {
+        let filtered = modifiedInput.value.replace(/[^\x20-\x7E]/g, '');
+        if (filtered.length > entry.length) filtered = filtered.slice(0, entry.length);
+        modifiedInput.value = filtered;
+        entry.current = filtered;
       });
 
-      div.append(label, orig, mod);
-      list.appendChild(div);
+      modifiedCol.appendChild(modifiedLabel);
+      modifiedCol.appendChild(modifiedInput);
+
+      div.appendChild(label);
+      div.appendChild(originalCol);
+      div.appendChild(modifiedCol);
+
+      frag.appendChild(div);
+    }
+    stringList.appendChild(frag);
+  }
+
+  // File loading & parsing
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+
+    progressContainer.style.display = 'block';
+    updateProgress(0);
+    stringList.innerHTML = 'Parsing file... Please wait.';
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      buffer = new Uint8Array(reader.result);
+      try {
+        const { stringLiteralCount, stringLiteralOffset } = parseMetadataHeader(buffer);
+        const literals = parseStringLiterals(buffer, stringLiteralOffset, stringLiteralCount);
+        processStringsIncrementally(literals);
+      } catch (e) {
+        stringList.textContent = 'Error parsing file: ' + e.message;
+        progressContainer.style.display = 'none';
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  });
+
+  // Search filter input (case sensitive)
+  searchInput.addEventListener('input', () => {
+    renderEntries(entries, searchInput.value);
+  });
+
+  // Download patched file with modifications applied
+  downloadBtn.addEventListener('click', () => {
+    if (!buffer) {
+      alert('Load a file first!');
+      return;
     }
 
-    searchInput.addEventListener('input', () => {
-      const query = searchInput.value;
-      const items = document.querySelectorAll('.entry');
-      items.forEach(el => {
-        const entry = entries.find(e => e.offset == el.dataset.offset);
-        if (entry.original.includes(query) || entry.current.includes(query)) {
-          el.style.display = '';
-        } else {
-          el.style.display = 'none';
+    // Make a copy of buffer
+    const patched = new Uint8Array(buffer);
+
+    // We'll overwrite strings in place if new string <= original length
+    // Otherwise append at the end (simplified, no pointer update, matches original app behavior)
+    // For in-place overwrite, pad with zeros if shorter
+
+    let appendOffset = patched.length; // append at end if needed
+
+    for (const entry of entries) {
+      const encoder = new TextEncoder();
+      const encoded = encoder.encode(entry.current);
+
+      if (encoded.length <= entry.length) {
+        // overwrite in place + pad zeros
+        patched.set(encoded, entry.offset);
+        for(let i=entry.offset + encoded.length; i<entry.offset + entry.length; i++) {
+          patched[i] = 0;
         }
-      });
-    });
+      } else {
+        // append at end - update string offset in table as well
+        // Find index of this entry in literals table (needed for updating offsets)
+        // The string literal table starts at offset 0x10 in header
 
-    downloadBtn.addEventListener('click', () => {
-      if (!buffer || entries.length === 0) return;
+        // Read stringLiteralCount and stringLiteralOffset again for safety
+        const stringLiteralCount = readUint32LE(patched, 0xC);
+        const stringLiteralOffset = readUint32LE(patched, 0x10);
 
-      const updated = new Uint8Array(buffer);
-      for (const e of entries) {
-        const strBuf = new TextEncoder().encode(e.current.padEnd(e.original.length, '\0'));
-        updated.set(strBuf.slice(0, e.original.length), e.offset);
+        // Find this entry's index by matching offset and length from original
+        let literalIndex = -1;
+        for (let i=0; i<stringLiteralCount; i++) {
+          const off = readUint32LE(patched, stringLiteralOffset + i*8);
+          const len = readUint32LE(patched, stringLiteralOffset + i*8 + 4);
+          if (off === entry.offset && len === entry.length) {
+            literalIndex = i;
+            break;
+          }
+        }
+        if (literalIndex === -1) {
+          alert('Error: Could not find string literal table entry to update offset.');
+          return;
+        }
+        // Append encoded string + zero padding if needed (no zero terminator needed)
+        const newOffset = appendOffset;
+        const newLength = encoded.length;
+
+        // Append to patched buffer
+        const newPatched = new Uint8Array(patched.length + newLength);
+        newPatched.set(patched, 0);
+        newPatched.set(encoded, newOffset);
+
+        // Update pointer in string literal table
+        newPatched[newOffset + newLength] = 0; // zero pad after appended string if desired
+        patched.set(newPatched);
+
+        // Overwrite string literal offset and length for this index
+        // offset uint32
+        newPatched[stringLiteralOffset + literalIndex*8 + 0] = newOffset & 0xFF;
+        newPatched[stringLiteralOffset + literalIndex*8 + 1] = (newOffset >> 8) & 0xFF;
+        newPatched[stringLiteralOffset + literalIndex*8 + 2] = (newOffset >> 16) & 0xFF;
+        newPatched[stringLiteralOffset + literalIndex*8 + 3] = (newOffset >> 24) & 0xFF;
+        // length uint32
+        newPatched[stringLiteralOffset + literalIndex*8 + 4] = newLength & 0xFF;
+        newPatched[stringLiteralOffset + literalIndex*8 + 5] = (newLength >> 8) & 0xFF;
+        newPatched[stringLiteralOffset + literalIndex*8 + 6] = (newLength >> 16) & 0xFF;
+        newPatched[stringLiteralOffset + literalIndex*8 + 7] = (newLength >> 24) & 0xFF;
+
+        patched.set(newPatched);
+        appendOffset += newLength;
       }
+    }
 
-      const blob = new Blob([updated], { type: 'application/octet-stream' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'modified-metadata.dat';
-      a.click();
+    // Create blob and download
+    const blob = new Blob([patched], {type:'application/octet-stream'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'global-metadata.patched.dat';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
       URL.revokeObjectURL(url);
-    });
-  </script>
+    }, 100);
+  });
+
+})();
+</script>
 </body>
 </html>
