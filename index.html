@@ -8,7 +8,7 @@
     body { margin: 0; font-family: system-ui; background: #121212; color: #e0e0e0; padding: 1rem; }
     h1 { text-align: center; }
     #controls { display: flex; gap: 1rem; margin-bottom: 1rem; justify-content: center; flex-wrap: wrap; }
-    #progress-container { display: none; background: #333; border-radius: 8px; overflow: hidden; width: 100%; max-width: 600px; margin: 0 auto; }
+    #progress-container { display: block; background: #333; border-radius: 8px; overflow: hidden; width: 100%; max-width: 600px; margin: 0 auto 1rem; }
     #progress-bar { height: 20px; width: 0%; background: #4caf50; text-align: center; color: #fff; font-weight: 600; font-size: .8rem; }
     #search { padding: .4rem; width: 100%; max-width: 400px; background: #000; border: 1px solid #555; color: #eee; border-radius: 4px; }
     #string-list { margin-top: 1rem; max-height: 60vh; overflow: auto; border: 1px solid #444; border-radius: 6px; padding: .5rem; }
@@ -42,38 +42,41 @@ let entries = [], buffer;
 fileInput.addEventListener('change', () => {
   const file = fileInput.files[0];
   if (!file) return;
+
   const reader = new FileReader();
   reader.onload = () => {
     buffer = new Uint8Array(reader.result);
-    progressBar.style.width = '0%';
-    progressBar.textContent = '0%';
     progressContainer.style.display = 'block';
     entries = extractStrings(buffer);
-    renderEntries(entries);
     progressBar.style.width = '100%';
     progressBar.textContent = 'Done';
-    progressContainer.style.display = 'none';
+    renderEntries(entries);
   };
   reader.readAsArrayBuffer(file);
 });
 
-function extractStrings(buffer) {
+function extractStrings(buf) {
   const strings = [];
+  const minLength = 3;
+  const decoder = new TextDecoder('ascii');
   let i = 0;
-  const minLength = 3, maxLength = 1000;
-  while (i < buffer.length) {
-    if (buffer[i] >= 0x20 && buffer[i] <= 0x7E) {
+  while (i < buf.length) {
+    if (buf[i] >= 0x20 && buf[i] <= 0x7E) {
       const start = i;
-      let length = 0;
-      while (i < buffer.length && buffer[i] >= 0x20 && buffer[i] <= 0x7E && length < maxLength) {
-        i++; length++;
-      }
-      if (i < buffer.length && buffer[i] === 0x00 && length >= minLength) {
-        const str = new TextDecoder('ascii').decode(buffer.slice(start, i));
-        strings.push({ offset: start, original: str, current: str });
+      while (i < buf.length && buf[i] >= 0x20 && buf[i] <= 0x7E) i++;
+      if (i < buf.length && buf[i] === 0x00) {
+        const str = decoder.decode(buf.slice(start, i));
+        if (str.length >= minLength) {
+          strings.push({ offset: start, original: str, current: str });
+        }
       }
     }
     i++;
+    if (i % 100000 === 0) {
+      const percent = Math.floor((i / buf.length) * 100);
+      progressBar.style.width = percent + '%';
+      progressBar.textContent = percent + '%';
+    }
   }
   return strings;
 }
@@ -114,19 +117,18 @@ searchInput.addEventListener('input', () => {
 });
 
 downloadBtn.addEventListener('click', () => {
-  const blob = new Uint8Array(buffer);
+  const updated = new Uint8Array(buffer);
   entries.forEach(e => {
     const encoded = new TextEncoder().encode(e.current.padEnd(e.original.length, '\0'));
-    blob.set(encoded.slice(0, e.original.length), e.offset);
+    updated.set(encoded.slice(0, e.original.length), e.offset);
   });
-  const url = URL.createObjectURL(new Blob([blob], { type: 'application/octet-stream' }));
+  const blob = new Blob([updated], { type: 'application/octet-stream' });
   const a = document.createElement('a');
-  a.href = url;
+  a.href = URL.createObjectURL(blob);
   a.download = 'modified-metadata.dat';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
 });
 </script>
 </body>
