@@ -125,7 +125,10 @@
           results.push(i);
         }
       }
-
+      if (results.length > 0) {
+        const first = results.splice(0, 1)[0];
+        addRow(originalStrings[first], first);
+      }
       let i = 0;
       function renderBatch() {
         const end = Math.min(i + 100, results.length);
@@ -195,18 +198,25 @@
     });
 
     downloadBtn.addEventListener('click', () => {
-      const out = new Uint8Array(fileBuffer);
+      const out = new Uint8Array(fileBuffer.byteLength + 10_000_000);
+      out.set(new Uint8Array(fileBuffer));
+      let cursor = fileBuffer.byteLength;
+      const pointerUpdates = [];
+
       originalStrings.forEach((s, idx) => {
         const newVal = modifiedStrings[idx];
         if (newVal !== s.value) {
           const newBytes = enc.encode(newVal);
-          if (newBytes.length <= s.value.length) {
-            out.set(newBytes, s.offset);
-            if (newBytes.length < s.value.length) out.fill(0x00, s.offset + newBytes.length, s.offset + s.value.length);
-          }
+          pointerUpdates.push({ offset: s.offset, newOffset: cursor, newLength: newBytes.length });
+          out.set(newBytes, cursor);
+          cursor += newBytes.length;
         }
       });
-      const blob = new Blob([out], { type: 'application/octet-stream' });
+
+      // Now fix header and offset table (this is pseudologic — needs full Il2Cpp header spec)
+      // Placeholder logic: Write back pointer update (for a real app, must parse metadata)
+
+      const blob = new Blob([out.slice(0, cursor)], { type: 'application/octet-stream' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = 'modified-global-metadata.dat';
