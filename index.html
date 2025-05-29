@@ -31,13 +31,18 @@
       width: 0;
     }
     .table {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 5px;
+      display: flex;
+      flex-direction: column;
       max-height: 400px;
       overflow-y: auto;
     }
-    .table input {
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 5px;
+      padding-bottom: 4px;
+    }
+    .row input {
       background: #222;
       border: 1px solid #555;
       color: white;
@@ -90,10 +95,11 @@
     let modifiedStrings = [];
     let fileBuffer;
 
-    // --- helper ---
     const enc = new TextEncoder();
 
     function addRow(entry, idx) {
+      const row = document.createElement('div');
+      row.className = 'row';
       const original = document.createElement('input');
       original.value = entry.value;
       original.disabled = true;
@@ -105,31 +111,28 @@
         downloadBtn.disabled = originalStrings.every((s, i) => s.value === modifiedStrings[i]);
       });
 
-      table.appendChild(original);
-      table.appendChild(input);
+      row.appendChild(original);
+      row.appendChild(input);
+      table.appendChild(row);
     }
 
-    // incremental renderer for search results
     function renderSearchResults(query) {
       table.innerHTML = '';
-      if (!query) {
-        // show first slice quickly
-        originalStrings.slice(0, 1000).forEach(addRow);
-        return;
-      }
       const q = query.toLowerCase();
-      let batch = 0;
+      const results = [];
+      for (let i = 0; i < originalStrings.length; i++) {
+        if (originalStrings[i].value.toLowerCase().includes(q) || modifiedStrings[i].toLowerCase().includes(q)) {
+          results.push(i);
+        }
+      }
+
       let i = 0;
       function renderBatch() {
-        const start = i;
-        const end = Math.min(i + 500, originalStrings.length);
+        const end = Math.min(i + 200, results.length);
         for (; i < end; i++) {
-          if (originalStrings[i].value.toLowerCase().includes(q) || modifiedStrings[i].toLowerCase().includes(q)) {
-            addRow(originalStrings[i], i);
-          }
+          addRow(originalStrings[results[i]], results[i]);
         }
-        batch++;
-        if (i < originalStrings.length) {
+        if (i < results.length) {
           requestAnimationFrame(renderBatch);
         }
       }
@@ -152,8 +155,7 @@
       modifiedStrings = [];
 
       let i = 0;
-      const step = 10000; // bytes per chunk
-
+      const step = 50000;
       function isPrintable(c) { return c >= 32 && c < 127; }
 
       async function processChunk() {
@@ -169,7 +171,6 @@
             if (cur.length >= 4) {
               originalStrings.push({ offset, value: cur });
               modifiedStrings.push(cur);
-              if (originalStrings.length <= 1000) addRow(originalStrings[originalStrings.length - 1], originalStrings.length - 1);
             }
             cur = '';
           }
@@ -181,6 +182,7 @@
         } else {
           loading.textContent = `Loaded ${originalStrings.length} strings.`;
           downloadBtn.disabled = false;
+          renderSearchResults('');
         }
       }
       processChunk();
