@@ -1,209 +1,160 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>Il2Cpp Metadata String Editor</title>
   <style>
-    body {
-      font-family: sans-serif;
-      padding: 20px;
-    }
-    #progress-container {
-      width: 100%;
-      background: #eee;
-      height: 20px;
-      margin-bottom: 10px;
-      display: none;
-    }
-    #progress-bar {
-      height: 100%;
-      width: 0%;
-      background: #76c7c0;
-    }
-    .string-entry {
-      margin: 5px 0;
-      display: flex;
-      gap: 10px;
-      align-items: center;
-    }
-    .string-entry span {
-      width: 50px;
-      font-weight: bold;
-    }
-    .string-entry input {
-      width: 80%;
-    }
-    #string-list {
-      max-height: 600px;
-      overflow-y: auto;
-      border: 1px solid #ccc;
-      padding: 10px;
-    }
-    #buttons {
-      margin-top: 20px;
-    }
+    body { font-family: sans-serif; margin: 20px; }
+    textarea { width: 100%; height: 80px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    td, th { border: 1px solid #ccc; padding: 5px; }
+    .modified { background-color: #ffe4b2; }
+    .controls { margin-top: 10px; }
   </style>
 </head>
 <body>
+  <h1>Il2Cpp Metadata String Editor (v29+ Supported)</h1>
+  <input type="file" id="fileInput" />
+  <div class="controls">
+    <button id="saveDat" disabled>💾 Save .dat</button>
+    <button id="saveIde" disabled>💾 Save .ide</button>
+  </div>
+  <table id="stringTable">
+    <thead>
+      <tr><th>#</th><th>Original</th><th>Modified</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+  <script>
+    const fileInput = document.getElementById('fileInput');
+    const tableBody = document.querySelector('#stringTable tbody');
+    const saveDatBtn = document.getElementById('saveDat');
+    const saveIdeBtn = document.getElementById('saveIde');
 
-<h2>Il2Cpp Metadata String Editor</h2>
+    let originalFile;
+    let modifiedStrings = [];
 
-<input type="file" id="metadata-file" />
-<div id="progress-container">
-  <div id="progress-bar"></div>
-</div>
-<div id="string-list"></div>
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files[0];
+      if (!file) return;
 
-<div id="buttons">
-  <button id="save-button-dat">Save as global-metadata.dat</button>
-  <button id="save-button-ide">Save as storage.ide</button>
-</div>
-
-<script>
-  let metadataBuffer;
-  let stringLiterals = [];
-  let parsedStrings = [];
-  let modifiedStrings = [];
-  let originalDatArrayBuffer;
-  let version = 0;
-  let stringLiteralOffset = 0;
-  let stringLiteralCount = 0;
-  let batchSize = 500;
-
-  const progressBar = document.getElementById('progress-bar');
-  const progressContainer = document.getElementById('progress-container');
-  const outputDiv = document.getElementById('string-list');
-
-  document.getElementById('metadata-file').addEventListener('change', handleFileSelect);
-  document.getElementById('save-button-dat').addEventListener('click', saveDatFile);
-  document.getElementById('save-button-ide').addEventListener('click', saveIDEFile);
-
-  function handleFileSelect(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = function(e) {
-      metadataBuffer = e.target.result;
-      originalDatArrayBuffer = metadataBuffer.slice(0);
-      stringLiterals = [];
-      parsedStrings = [];
+      originalFile = file;
+      tableBody.innerHTML = '';
       modifiedStrings = [];
-      outputDiv.innerHTML = '';
 
-      try {
-        parseMetadataHeader();
-        renderStringsIncrementally();
-      } catch (error) {
-        alert("Failed to parse metadata: " + error.message);
-      }
-    };
-    reader.readAsArrayBuffer(file);
-  }
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        const buffer = new Uint8Array(e.target.result);
+        extractStringsLive(buffer);
+      };
+      reader.readAsArrayBuffer(file);
+    });
 
-  function parseMetadataHeader() {
-    const dataView = new DataView(metadataBuffer);
-    version = dataView.getInt32(4, true);
-    stringLiteralOffset = dataView.getUint32(0x20, true);
-    stringLiteralCount = dataView.getUint32(0x24, true);
+    function extractStringsLive(buffer) {
+      const minLen = 4;
+      const strings = [];
+      let str = '';
+      let offset = 0;
+      let shown = 0;
 
-    if (stringLiteralCount <= 0 || stringLiteralCount > 1000000) {
-      throw new Error("Invalid string literal count: " + stringLiteralCount);
-    }
-
-    for (let i = 0; i < stringLiteralCount; i++) {
-      const offset = stringLiteralOffset + i * 8;
-      const stringOffset = new DataView(metadataBuffer, offset, 4).getUint32(0, true);
-      const stringLength = new DataView(metadataBuffer, offset + 4, 4).getUint32(0, true);
-      stringLiterals.push({ offset: stringOffset, length: stringLength, index: i });
-    }
-  }
-
-  function renderStringsIncrementally(startIndex = 0) {
-    progressContainer.style.display = 'block';
-    const fragment = document.createDocumentFragment();
-
-    for (let i = startIndex; i < Math.min(startIndex + batchSize, stringLiterals.length); i++) {
-      const { offset, length, index } = stringLiterals[i];
-      let stringText = '';
-      try {
-        const stringBytes = new Uint8Array(metadataBuffer, offset, length);
-        stringText = new TextDecoder().decode(stringBytes);
-      } catch (e) {
-        stringText = '[Invalid String]';
+      function isPrintable(c) {
+        return c >= 0x20 && c <= 0x7E;
       }
 
-      const div = document.createElement('div');
-      div.className = 'string-entry';
-      div.innerHTML = `
-        <span>#${index}</span>
-        <input type="text" data-index="${index}" value="${stringText}">
-      `;
-      fragment.appendChild(div);
-      parsedStrings[index] = stringText;
-      modifiedStrings[index] = stringText;
-    }
-
-    outputDiv.appendChild(fragment);
-    const percent = Math.floor(((startIndex + batchSize) / stringLiterals.length) * 100);
-    progressBar.style.width = `${percent}%`;
-
-    if (startIndex + batchSize < stringLiterals.length) {
-      setTimeout(() => renderStringsIncrementally(startIndex + batchSize), 10);
-    } else {
-      progressContainer.style.display = 'none';
-    }
-  }
-
-  outputDiv.addEventListener('input', e => {
-    if (e.target.tagName === 'INPUT') {
-      const index = e.target.getAttribute('data-index');
-      modifiedStrings[index] = e.target.value;
-    }
-  });
-
-  function saveIDEFile() {
-    const changes = {};
-    for (let i = 0; i < modifiedStrings.length; i++) {
-      if (modifiedStrings[i] !== parsedStrings[i]) {
-        changes[i] = modifiedStrings[i];
+      function flushString() {
+        if (str.length >= minLen) {
+          const index = strings.length;
+          strings.push(str);
+          modifiedStrings.push(str);
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${index}</td>
+            <td>${str}</td>
+            <td><input data-idx="${index}" value="${str}" /></td>`;
+          tableBody.appendChild(tr);
+        }
+        str = '';
       }
+
+      const batchSize = 100000;
+      const chunk = () => {
+        for (let i = offset; i < offset + batchSize && i < buffer.length; i++) {
+          const c = buffer[i];
+          if (isPrintable(c)) {
+            str += String.fromCharCode(c);
+          } else {
+            flushString();
+          }
+        }
+        flushString();
+        offset += batchSize;
+        if (offset < buffer.length) {
+          requestAnimationFrame(chunk);
+        } else {
+          saveDatBtn.disabled = false;
+          saveIdeBtn.disabled = false;
+        }
+      };
+      chunk();
     }
-    const blob = new Blob([JSON.stringify(changes, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'storage.ide';
-    a.click();
-  }
 
-  function saveDatFile() {
-    const newBuffer = new ArrayBuffer(originalDatArrayBuffer.byteLength + 10 * 1024 * 1024);
-    const newDataView = new DataView(newBuffer);
-    new Uint8Array(newBuffer).set(new Uint8Array(originalDatArrayBuffer));
-
-    let appendOffset = originalDatArrayBuffer.byteLength;
-    for (let i = 0; i < stringLiterals.length; i++) {
-      if (modifiedStrings[i] !== parsedStrings[i]) {
-        const newString = new TextEncoder().encode(modifiedStrings[i]);
-        new Uint8Array(newBuffer, appendOffset, newString.length).set(newString);
-
-        // Update offset and length in Il2CppStringLiteral
-        const entryOffset = stringLiteralOffset + i * 8;
-        newDataView.setUint32(entryOffset, appendOffset, true);
-        newDataView.setUint32(entryOffset + 4, newString.length, true);
-
-        appendOffset += newString.length;
+    tableBody.addEventListener('input', (e) => {
+      if (e.target.tagName === 'INPUT') {
+        const idx = +e.target.dataset.idx;
+        modifiedStrings[idx] = e.target.value;
+        e.target.closest('tr').classList.add('modified');
       }
-    }
+    });
 
-    const trimmedBuffer = newBuffer.slice(0, appendOffset);
-    const blob = new Blob([trimmedBuffer], { type: 'application/octet-stream' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'global-metadata-modified.dat';
-    a.click();
-  }
-</script>
+    saveIdeBtn.addEventListener('click', () => {
+      const lines = [];
+      for (let i = 0; i < modifiedStrings.length; i++) {
+        if (modifiedStrings[i] !== null && modifiedStrings[i] !== '') {
+          lines.push(modifiedStrings[i]);
+        }
+      }
+      const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'storage.ide';
+      a.click();
+      URL.revokeObjectURL(url);
+    });
 
+    saveDatBtn.addEventListener('click', () => {
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        const original = new Uint8Array(e.target.result);
+        const encoder = new TextEncoder();
+        const modified = new Uint8Array(original);
+
+        const addedStrings = [];
+        const baseOffset = original.length;
+        let writePtr = baseOffset;
+
+        for (let i = 0; i < modifiedStrings.length; i++) {
+          const modStr = modifiedStrings[i];
+          const origStr = tableBody.rows[i].cells[1].textContent;
+          if (modStr !== origStr) {
+            const encoded = encoder.encode(modStr + '\0');
+            addedStrings.push(...encoded);
+          }
+        }
+
+        const finalBuffer = new Uint8Array(original.length + addedStrings.length);
+        finalBuffer.set(original, 0);
+        finalBuffer.set(addedStrings, original.length);
+
+        const blob = new Blob([finalBuffer], { type: 'application/octet-stream' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'global-metadata-modified.dat';
+        a.click();
+        URL.revokeObjectURL(url);
+      };
+      reader.readAsArrayBuffer(originalFile);
+    });
+  </script>
 </body>
 </html>
