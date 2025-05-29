@@ -8,7 +8,7 @@
     body {
       background-color: #121212;
       color: #fff;
-      font-family: sans-serif;
+      font-family: monospace, monospace;
       padding: 20px;
     }
     .header {
@@ -90,6 +90,52 @@
     let modifiedStrings = [];
     let fileBuffer;
 
+    // --- helper ---
+    const enc = new TextEncoder();
+
+    function addRow(entry, idx) {
+      const original = document.createElement('input');
+      original.value = entry.value;
+      original.disabled = true;
+
+      const input = document.createElement('input');
+      input.value = modifiedStrings[idx];
+      input.addEventListener('input', ev => {
+        modifiedStrings[idx] = ev.target.value;
+        downloadBtn.disabled = originalStrings.every((s, i) => s.value === modifiedStrings[i]);
+      });
+
+      table.appendChild(original);
+      table.appendChild(input);
+    }
+
+    // incremental renderer for search results
+    function renderSearchResults(query) {
+      table.innerHTML = '';
+      if (!query) {
+        // show first slice quickly
+        originalStrings.slice(0, 1000).forEach(addRow);
+        return;
+      }
+      const q = query.toLowerCase();
+      let batch = 0;
+      let i = 0;
+      function renderBatch() {
+        const start = i;
+        const end = Math.min(i + 500, originalStrings.length);
+        for (; i < end; i++) {
+          if (originalStrings[i].value.toLowerCase().includes(q) || modifiedStrings[i].toLowerCase().includes(q)) {
+            addRow(originalStrings[i], i);
+          }
+        }
+        batch++;
+        if (i < originalStrings.length) {
+          requestAnimationFrame(renderBatch);
+        }
+      }
+      requestAnimationFrame(renderBatch);
+    }
+
     fileInput.addEventListener('change', async e => {
       const file = e.target.files[0];
       if (!file) return;
@@ -102,98 +148,60 @@
       fileBuffer = await file.arrayBuffer();
       const bytes = new Uint8Array(fileBuffer);
 
-      const strings = [];
+      originalStrings = [];
+      modifiedStrings = [];
+
       let i = 0;
-      const step = 5000; // # of bytes per chunk
+      const step = 10000; // bytes per chunk
 
-      function isPrintable(charCode) {
-        return charCode >= 32 && charCode < 127;
-      }
+      function isPrintable(c) { return c >= 32 && c < 127; }
 
-      function processChunk() {
-        const start = i;
+      async function processChunk() {
         const end = Math.min(i + step, bytes.length);
-        let currentString = '';
-
+        let cur = '';
+        let offset = i;
         while (i < end) {
-          const byte = bytes[i];
-          if (isPrintable(byte)) {
-            currentString += String.fromCharCode(byte);
+          const b = bytes[i];
+          if (isPrintable(b)) {
+            if (cur === '') offset = i;
+            cur += String.fromCharCode(b);
           } else {
-            if (currentString.length >= 4) {
-              strings.push({ offset: i - currentString.length, value: currentString });
-              if (strings.length <= 1000) {
-                addToTable(strings[strings.length - 1]);
-              }
+            if (cur.length >= 4) {
+              originalStrings.push({ offset, value: cur });
+              modifiedStrings.push(cur);
+              if (originalStrings.length <= 1000) addRow(originalStrings[originalStrings.length - 1], originalStrings.length - 1);
             }
-            currentString = '';
+            cur = '';
           }
           i++;
         }
-
-        const percent = ((i / bytes.length) * 100).toFixed(1);
-        progress.style.width = percent + '%';
-
+        progress.style.width = ((i / bytes.length) * 100).toFixed(1) + '%';
         if (i < bytes.length) {
           setTimeout(processChunk, 0);
         } else {
-          originalStrings = strings;
-          modifiedStrings = strings.map(s => s.value);
-          loading.textContent = `Loaded ${strings.length} strings.`;
+          loading.textContent = `Loaded ${originalStrings.length} strings.`;
           downloadBtn.disabled = false;
         }
       }
-
-      function addToTable(entry) {
-        const input = document.createElement('input');
-        input.value = entry.value;
-        input.addEventListener('input', e => {
-          const index = originalStrings.findIndex(s => s.offset === entry.offset);
-          modifiedStrings[index] = e.target.value;
-        });
-
-        const original = document.createElement('input');
-        original.value = entry.value;
-        original.disabled = true;
-
-        table.appendChild(original);
-        table.appendChild(input);
-      }
-
       processChunk();
     });
 
-    search.addEventListener('input', e => {
-      const query = e.target.value.toLowerCase();
-      table.innerHTML = '';
-      originalStrings.forEach((entry, idx) => {
-        if (entry.value.toLowerCase().includes(query)) {
-          const original = document.createElement('input');
-          original.value = entry.value;
-          original.disabled = true;
-
-          const input = document.createElement('input');
-          input.value = modifiedStrings[idx];
-          input.addEventListener('input', ev => {
-            modifiedStrings[idx] = ev.target.value;
-          });
-
-          table.appendChild(original);
-          table.appendChild(input);
-        }
-      });
+    search.addEventListener('input', () => {
+      renderSearchResults(search.value);
     });
 
     downloadBtn.addEventListener('click', () => {
       const out = new Uint8Array(fileBuffer);
-      modifiedStrings.forEach((str, idx) => {
-        const orig = originalStrings[idx];
-        const bytes = new TextEncoder().encode(str);
-        if (bytes.length <= orig.value.length) {
-          out.set(bytes, orig.offset);
+      originalStrings.forEach((s, idx) => {
+        const newVal = modifiedStrings[idx];
+        if (newVal !== s.value) {
+          const newBytes = enc.encode(newVal);
+          if (newBytes.length <= s.value.length) {
+            out.set(newBytes, s.offset);
+            if (newBytes.length < s.value.length) out.fill(0x00, s.offset + newBytes.length, s.offset + s.value.length);
+          }
         }
       });
-
       const blob = new Blob([out], { type: 'application/octet-stream' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
