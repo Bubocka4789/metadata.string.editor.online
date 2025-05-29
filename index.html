@@ -128,15 +128,15 @@
 
       let i = 0;
       function renderBatch() {
-        const end = Math.min(i + 200, results.length);
+        const end = Math.min(i + 100, results.length);
         for (; i < end; i++) {
           addRow(originalStrings[results[i]], results[i]);
         }
         if (i < results.length) {
-          requestAnimationFrame(renderBatch);
+          setTimeout(renderBatch, 0);
         }
       }
-      requestAnimationFrame(renderBatch);
+      renderBatch();
     }
 
     fileInput.addEventListener('change', async e => {
@@ -182,14 +182,16 @@
         } else {
           loading.textContent = `Loaded ${originalStrings.length} strings.`;
           downloadBtn.disabled = false;
-          renderSearchResults('');
+          renderSearchResults(search.value);
         }
       }
       processChunk();
     });
 
+    let searchTimeout;
     search.addEventListener('input', () => {
-      renderSearchResults(search.value);
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(() => renderSearchResults(search.value), 100);
     });
 
     downloadBtn.addEventListener('click', () => {
