@@ -1,615 +1,205 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Advanced VR global-metadata.dat String Editor</title>
-<style>
-  body {
-    margin: 0; font-family: monospace, monospace;
-    background-color: #121212; color: #ddd;
-  }
-  header {
-    background: #1f1f1f; padding: 10px;
-    display: flex; align-items: center; justify-content: space-between;
-    flex-wrap: wrap;
-  }
-  h1 {
-    margin: 0 0 0.25em 0; font-weight: normal; font-size: 1.4rem;
-    flex: 1 1 300px;
-  }
-  #fileInput {
-    color: #ccc;
-    margin-right: 10px;
-  }
-  #search {
-    width: 220px; padding: 6px; background: #222; border: 1px solid #555; color: #ddd;
-    border-radius: 4px;
-    margin-right: 10px;
-  }
-  button {
-    background: #4caf50;
-    border: none;
-    color: white;
-    padding: 6px 12px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-weight: bold;
-  }
-  button:disabled {
-    background: #555;
-    cursor: not-allowed;
-  }
-  #status {
-    font-size: 0.9rem;
-    color: #888;
-    margin-top: 5px;
-  }
-  #stringsContainer {
-    height: 80vh;
-    overflow: auto;
-    margin: 0 10px 10px 10px;
-  }
-  table {
-    width: 100%; border-collapse: collapse;
-  }
-  th, td {
-    padding: 6px 8px; border: 1px solid #333; color: #eee;
-    vertical-align: middle;
-  }
-  th {
-    background: #222;
-    position: sticky;
-    top: 0;
-    z-index: 2;
-  }
-  input.edit-string {
-    width: 100%; background: #222; border: none; color: #eee;
-    font-family: monospace;
-    padding: 5px;
-  }
-  input.edit-string:focus {
-    outline: 2px solid #4caf50;
-  }
-  #footer {
-    font-size: 0.85rem;
-    color: #666;
-    padding: 5px 10px;
-    border-top: 1px solid #333;
-    background: #1f1f1f;
-  }
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Il2Cpp Metadata Editor</title>
+  <style>
+    body {
+      background-color: #121212;
+      color: #fff;
+      font-family: sans-serif;
+      padding: 20px;
+    }
+    .header {
+      font-size: 1.5em;
+      margin-bottom: 10px;
+    }
+    input[type="file"] {
+      margin-bottom: 10px;
+    }
+    .progress-bar {
+      width: 100%;
+      background: #444;
+      border-radius: 5px;
+      overflow: hidden;
+      margin-bottom: 10px;
+    }
+    .progress {
+      height: 10px;
+      background: #76c7c0;
+      width: 0;
+    }
+    .table {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 5px;
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .table input {
+      background: #222;
+      border: 1px solid #555;
+      color: white;
+      padding: 4px;
+    }
+    .top-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .search {
+      margin-bottom: 10px;
+    }
+    button {
+      background: #333;
+      color: #fff;
+      padding: 5px 10px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #555;
+    }
+  </style>
 </head>
 <body>
-<header>
-  <h1>Advanced VR global-metadata.dat String Editor</h1>
-  <div style="display:flex; align-items:center; flex-wrap:wrap;">
-    <input type="file" id="fileInput" accept=".dat" />
-    <input type="text" id="search" placeholder="Search strings..." disabled />
+  <div class="top-bar">
+    <div class="header">Il2Cpp Metadata Editor <span id="version"></span></div>
     <button id="downloadBtn" disabled>Download Modified</button>
   </div>
-  <div id="status"></div>
-</header>
 
-<div id="stringsContainer">
-  <table id="stringsTable" aria-label="Strings Table">
-    <thead>
-      <tr>
-        <th style="width:120px;">Offset (hex)</th>
-        <th style="width:35%;">Original String</th>
-        <th>Modified String</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
-</div>
+  <input type="file" id="fileInput" accept=".dat" />
+  <div id="loading"></div>
+  <div class="progress-bar"><div class="progress" id="progress"></div></div>
 
-<div id="footer">
-  Made for VR Il2Cpp global-metadata.dat editing. Supports multiple files, real-time search, in-place and appended save.
-</div>
+  <input type="text" class="search" id="search" placeholder="Search strings..." />
 
-<script>
-  // --- Constants and Globals ---
-  const MIN_STRING_LENGTH = 4;
-  const BATCH_SIZE = 100; // Strings rendered per batch for UI responsiveness
+  <div class="table" id="table"></div>
 
-  let fileBuffer = null; // Original file buffer (ArrayBuffer)
-  let uint8Data = null; // Uint8Array view of fileBuffer
-  let strings = []; // {offset, length, originalStr, newStr?}
-  let modifiedCount = 0;
-  let metadataHeader = null; // Parsed metadata header info if available
-  let stringLiteralTable = null; // Parsed string literal table if found
+  <script>
+    const fileInput = document.getElementById('fileInput');
+    const loading = document.getElementById('loading');
+    const table = document.getElementById('table');
+    const search = document.getElementById('search');
+    const progress = document.getElementById('progress');
+    const downloadBtn = document.getElementById('downloadBtn');
 
-  // UI Elements
-  const fileInput = document.getElementById('fileInput');
-  const searchInput = document.getElementById('search');
-  const downloadBtn = document.getElementById('downloadBtn');
-  const stringsTableBody = document.querySelector('#stringsTable tbody');
-  const statusEl = document.getElementById('status');
+    let originalStrings = [];
+    let modifiedStrings = [];
+    let fileBuffer;
 
-  // --- Utility Functions ---
+    fileInput.addEventListener('change', async e => {
+      const file = e.target.files[0];
+      if (!file) return;
 
-  // Check if a byte is printable ASCII or tab/newline/carriage return
-  function isPrintableByte(byte) {
-    return (byte >= 0x20 && byte <= 0x7E) || byte === 0x09 || byte === 0x0A || byte === 0x0D;
-  }
-
-  // Decode UTF-8 safely from a Uint8Array slice
-  function decodeUTF8(bytes) {
-    try {
-      return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-    } catch {
-      return null;
-    }
-  }
-
-  // Encode UTF-8 string to Uint8Array
-  function encodeUTF8(str) {
-    return new TextEncoder().encode(str);
-  }
-
-  // Read a 32-bit little endian unsigned int from DataView at offset
-  function readUInt32LE(dataview, offset) {
-    if (offset + 4 > dataview.byteLength) return null;
-    return dataview.getUint32(offset, true);
-  }
-
-  // Sleep async helper
-  function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  // Format offset number as 0x + uppercase hex with zero pad to 8 digits
-  function formatOffset(offset) {
-    return '0x' + offset.toString(16).toUpperCase().padStart(8, '0');
-  }
-
-  // --- Parsing Metadata Header (Il2Cpp) ---
-
-  function parseMetadataHeader() {
-    // Il2Cpp metadata header typically at offset 0, 0xFAB11BAF magic number (little endian)
-    // We'll read basic known fields:
-    // struct Il2CppMetadataHeader {
-    //   uint32_t magic; // 0xFAB11BAF or 0xFAB11BFA
-    //   uint32_t version;
-    //   uint32_t stringLiteralOffset;
-    //   uint32_t stringLiteralCount;
-    //   // ...
-    // }
-    const dv = new DataView(fileBuffer);
-    if (dv.byteLength < 0x20) return null;
-    const magic = dv.getUint32(0, true);
-    if (magic !== 0xFAB11BAF && magic !== 0xFAB11BFA) return null;
-
-    const version = dv.getUint32(4, true);
-    const stringLiteralOffset = dv.getUint32(8, true);
-    const stringLiteralCount = dv.getUint32(12, true);
-    // Validate stringLiteralOffset/count are inside file
-    if (
-      stringLiteralOffset === 0 || stringLiteralOffset >= dv.byteLength ||
-      stringLiteralCount === 0 || (stringLiteralOffset + stringLiteralCount * 8) > dv.byteLength
-    ) {
-      // Invalid metadata string literal table - may be VR or corrupted
-      return null;
-    }
-
-    return { magic, version, stringLiteralOffset, stringLiteralCount };
-  }
-
-  // --- Parsing String Literal Table ---
-
-  // Each entry: struct Il2CppStringLiteral {
-  //   uint32_t stringDataIndex;
-  //   uint32_t length; // string length in UTF-16 code units
-  // }
-  // We use stringDataIndex to locate string data: metadata->stringDataOffset + stringDataIndex (in bytes)
-  // VR global-metadata.dat has differences; fallback to scan strings
-
-  async function parseStringLiteralTable(header) {
-    const dv = new DataView(fileBuffer);
-    const table = [];
-    const baseOffset = header.stringLiteralOffset;
-    const count = header.stringLiteralCount;
-
-    // Sanity check
-    if (baseOffset + count * 8 > dv.byteLength) return null;
-
-    // For VR files, string data offset is at fixed offset 0x10 (metadata->stringDataOffset)
-    // We'll read stringDataOffset field at offset 0x10
-    const stringDataOffset = dv.getUint32(16, true);
-    if (stringDataOffset === 0 || stringDataOffset >= dv.byteLength) return null;
-
-    for (let i = 0; i < count; i++) {
-      const entryOffset = baseOffset + i * 8;
-      if (entryOffset + 8 > dv.byteLength) break;
-      const stringDataIndex = dv.getUint32(entryOffset, true);
-      const lengthUTF16 = dv.getUint32(entryOffset + 4, true);
-
-      // Calculate string absolute offset in file
-      const stringOffset = stringDataOffset + stringDataIndex;
-
-      if (stringOffset >= dv.byteLength) continue;
-
-      // Read UTF16 string, lengthUTF16 * 2 bytes
-      if (stringOffset + lengthUTF16 * 2 > dv.byteLength) continue;
-
-      // Decode UTF16LE string
-      const stringBytes = new Uint8Array(fileBuffer, stringOffset, lengthUTF16 * 2);
-      let decodedStr = '';
-      try {
-        decodedStr = new TextDecoder('utf-16le').decode(stringBytes);
-      } catch {
-        decodedStr = null;
-      }
-      if (!decodedStr || decodedStr.length === 0) continue;
-
-      table.push({
-        index: i,
-        stringDataIndex,
-        lengthUTF16,
-        offset: stringOffset,
-        originalStr: decodedStr,
-        newStr: null,
-      });
-    }
-
-    return table;
-  }
-
-  // --- Fallback: Full file scan for UTF-8 strings (including spaces) ---
-
-  async function scanFileForStrings() {
-    const data = uint8Data;
-    const foundStrings = [];
-
-    let currentBytes = [];
-    let currentOffset = 0;
-    let scanning = false;
-
-    for (let i = 0; i < data.length; i++) {
-      const byte = data[i];
-      if (isPrintableByte(byte)) {
-        if (!scanning) {
-          scanning = true;
-          currentOffset = i;
-          currentBytes = [];
-        }
-        currentBytes.push(byte);
-      } else {
-        if (scanning) {
-          if (currentBytes.length >= MIN_STRING_LENGTH) {
-            const str = decodeUTF8(Uint8Array.from(currentBytes));
-            if (str && str.trim().length >= MIN_STRING_LENGTH) {
-              foundStrings.push({
-                offset: currentOffset,
-                length: currentBytes.length,
-                originalStr: str,
-                newStr: null,
-              });
-            }
-          }
-          scanning = false;
-          currentBytes = [];
-        }
-      }
-    }
-    // Check last string
-    if (scanning && currentBytes.length >= MIN_STRING_LENGTH) {
-      const str = decodeUTF8(Uint8Array.from(currentBytes));
-      if (str && str.trim().length >= MIN_STRING_LENGTH) {
-        foundStrings.push({
-          offset: currentOffset,
-          length: currentBytes.length,
-          originalStr: str,
-          newStr: null,
-        });
-      }
-    }
-    return foundStrings;
-  }
-
-  // --- UI rendering with batching to avoid freezing ---
-
-  async function renderTableBatch(filterText = '') {
-    stringsTableBody.innerHTML = '';
-    const filterLower = filterText.toLowerCase();
-    const filteredStrings = strings.filter(s => s.originalStr.toLowerCase().includes(filterLower) || (s.newStr && s.newStr.toLowerCase().includes(filterLower)));
-
-    if (filteredStrings.length === 0) {
-      const tr = document.createElement('tr');
-      const td = document.createElement('td');
-      td.colSpan = 3;
-      td.style.textAlign = 'center';
-      td.textContent = 'No matching strings found.';
-      tr.appendChild(td);
-      stringsTableBody.appendChild(tr);
-      return;
-    }
-
-    // Batch rendering
-    for (let i = 0; i < filteredStrings.length; i += BATCH_SIZE) {
-      const batch = filteredStrings.slice(i, i + BATCH_SIZE);
-      const fragment = document.createDocumentFragment();
-
-      for (const s of batch) {
-        const tr = document.createElement('tr');
-
-        // Offset hex
-        const tdOffset = document.createElement('td');
-        tdOffset.textContent = formatOffset(s.offset);
-        tdOffset.title = `Offset in file: ${s.offset}`;
-        tr.appendChild(tdOffset);
-
-        // Original string
-        const tdOriginal = document.createElement('td');
-        tdOriginal.textContent = s.originalStr;
-        tdOriginal.style.userSelect = 'text';
-        tr.appendChild(tdOriginal);
-
-        // Editable input for modified string
-        const tdEdit = document.createElement('td');
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.value = s.newStr !== null ? s.newStr : s.originalStr;
-        input.classList.add('edit-string');
-        input.spellcheck = false;
-        input.autocomplete = 'off';
-
-        // Save original length & offset to dataset
-        input.dataset.offset = s.offset;
-        input.dataset.origLength = s.length;
-
-        // Listen for input changes
-        input.addEventListener('input', (ev) => {
-          const val = ev.target.value;
-          const offset = parseInt(ev.target.dataset.offset);
-          const origLen = parseInt(ev.target.dataset.origLength);
-          // Validate UTF-8 length ≤ origLen or mark for append
-          const encoded = encodeUTF8(val);
-          const strObj = strings.find(x => x.offset === offset);
-          if (!strObj) return;
-
-          // Update newStr
-          if (val === strObj.originalStr) {
-            if (strObj.newStr !== null) {
-              strObj.newStr = null;
-              modifiedCount--;
-            }
-          } else {
-            if (strObj.newStr === null) modifiedCount++;
-            strObj.newStr = val;
-          }
-
-          // Enable or disable download button
-          downloadBtn.disabled = modifiedCount === 0;
-
-          // Mark input border red if UTF-8 length > original length (in-place overwrite impossible)
-          if (encoded.length > origLen) {
-            input.style.borderColor = '#f44336';
-            input.title = `Length ${encoded.length} bytes exceeds original string byte length ${origLen}. Will be appended on save.`;
-          } else {
-            input.style.borderColor = '';
-            input.title = '';
-          }
-        });
-
-        tdEdit.appendChild(input);
-        tr.appendChild(tdEdit);
-
-        fragment.appendChild(tr);
-      }
-      stringsTableBody.appendChild(fragment);
-
-      // Yield to event loop for UI responsiveness
-      await sleep(10);
-    }
-  }
-
-  // --- Save Modified File ---
-
-  async function saveModifiedFile() {
-    if (!fileBuffer || modifiedCount === 0) return;
-
-    const dv = new DataView(fileBuffer);
-    const newFile = new Uint8Array(fileBuffer.byteLength + 1024 * 1024); // Extra 1MB max appended data buffer
-    newFile.set(new Uint8Array(fileBuffer)); // Copy original file
-    let newFileLength = fileBuffer.byteLength;
-
-    // We will try to update string literal table if possible
-    if (!metadataHeader) {
-      // No metadata header, no string literal table, fallback to in-place overwrite only
-      alert('Metadata header not found. Only in-place overwrites for modified strings shorter or equal to original length will be saved.');
-    }
-
-    // Make a copy of string literal table entries if present
-    const updatedStringLiteralTable = metadataHeader ? JSON.parse(JSON.stringify(stringLiteralTable)) : null;
-
-    // Keep track of appended strings offsets and updated string literal table entries
-    for (const s of strings) {
-      if (s.newStr === null) continue; // Not modified
-      const origEncodedLength = s.length;
-
-      // Encode new string as UTF8 (or UTF16 if we are parsing string literal table - but fallback here to UTF8 for safety)
-      // Because original strings may be UTF16 in metadata, let's encode modified strings accordingly:
-      let newEncoded;
-      let isUTF16 = false;
-
-      // Check if string exists in stringLiteralTable => UTF16LE, else UTF8 fallback
-      if (updatedStringLiteralTable) {
-        const litEntry = updatedStringLiteralTable.find(x => x.offset === s.offset);
-        if (litEntry) {
-          // Encode as UTF16LE
-          isUTF16 = true;
-          const encoder = new TextEncoder('utf-16le'); // TextEncoder doesn't support utf-16le, fallback:
-          // We'll do manual encoding utf-16le:
-          const str = s.newStr;
-          const buf = new ArrayBuffer(str.length * 2);
-          const bufView = new Uint16Array(buf);
-          for (let i = 0; i < str.length; i++) bufView[i] = str.charCodeAt(i);
-          newEncoded = new Uint8Array(buf);
-        } else {
-          // Not found in table: fallback UTF8
-          newEncoded = encodeUTF8(s.newStr);
-        }
-      } else {
-        // No string literal table, use UTF8
-        newEncoded = encodeUTF8(s.newStr);
-      }
-
-      if (!newEncoded) continue;
-
-      // If new encoded length ≤ original length, overwrite in place
-      if (newEncoded.length <= origEncodedLength) {
-        newFile.set(newEncoded, s.offset);
-        // Pad remainder bytes with 0x00
-        for (let p = s.offset + newEncoded.length; p < s.offset + origEncodedLength; p++) {
-          newFile[p] = 0x00;
-        }
-      } else {
-        // Append new string at EOF and update string literal table if possible
-        if (updatedStringLiteralTable) {
-          // Append UTF16LE string data to EOF and update offset
-          if (!isUTF16) {
-            alert('Warning: Expected UTF16 strings in string literal table but new string is not UTF16 encoded. Skipping append for this string.');
-            continue;
-          }
-          // Append new string data
-          const appendOffset = newFileLength;
-          newFile.set(newEncoded, appendOffset);
-          newFileLength += newEncoded.length;
-
-          // Update string literal table entry offset for this string
-          for (const lit of updatedStringLiteralTable) {
-            if (lit.offset === s.offset) {
-              lit.offset = appendOffset;
-              // Update lengthUTF16
-              lit.lengthUTF16 = s.newStr.length;
-              break;
-            }
-          }
-        } else {
-          // No metadata, cannot update offsets. Warn user and skip
-          alert(`Cannot append string beyond original length without metadata header. String at offset ${formatOffset(s.offset)} will NOT be modified.`);
-          continue;
-        }
-      }
-    }
-
-    // If we have updated string literal table, write updated table back to file
-    if (updatedStringLiteralTable) {
-      // Write updated table entries back to stringLiteralOffset
-      const dvNew = new DataView(newFile.buffer);
-      const baseOffset = metadataHeader.stringLiteralOffset;
-
-      for (let i = 0; i < updatedStringLiteralTable.length; i++) {
-        const lit = updatedStringLiteralTable[i];
-        const entryOffset = baseOffset + i * 8;
-        dvNew.setUint32(entryOffset, lit.offset - metadataHeader.stringDataOffset, true);
-        dvNew.setUint32(entryOffset + 4, lit.lengthUTF16, true);
-      }
-    }
-
-    // Trim newFile buffer to actual length
-    const trimmed = newFile.subarray(0, newFileLength);
-
-    // Trigger download
-    const blob = new Blob([trimmed], { type: 'application/octet-stream' });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'global-metadata-modified.dat';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => {
-      URL.revokeObjectURL(url);
-      a.remove();
-    }, 1000);
-
-    // Reset modified count & UI
-    modifiedCount = 0;
-    downloadBtn.disabled = true;
-    alert('Modified file ready for download.');
-  }
-
-  // --- Main File Load Handler ---
-
-  async function handleFileLoad(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    resetState();
-
-    statusEl.textContent = `Loading file ${file.name} (${(file.size / (1024 * 1024)).toFixed(2)} MB)...`;
-
-    try {
-      fileBuffer = await file.arrayBuffer();
-      uint8Data = new Uint8Array(fileBuffer);
-
-      // Parse metadata header
-      metadataHeader = parseMetadataHeader();
-      if (metadataHeader) {
-        statusEl.textContent = `Metadata header found. Version: ${metadataHeader.version}. Parsing string literal table...`;
-        stringLiteralTable = await parseStringLiteralTable(metadataHeader);
-        if (!stringLiteralTable || stringLiteralTable.length === 0) {
-          statusEl.textContent = 'String literal table empty or invalid, falling back to file scan.';
-          strings = await scanFileForStrings();
-        } else {
-          strings = stringLiteralTable.map(x => ({
-            offset: x.offset,
-            length: x.originalStr ? encodeUTF8(x.originalStr).length : 0,
-            originalStr: x.originalStr || '',
-            newStr: null,
-          }));
-          statusEl.textContent = `Parsed ${strings.length} strings from string literal table.`;
-        }
-      } else {
-        statusEl.textContent = 'Metadata header not found. Scanning entire file for printable UTF-8 strings (including spaces)...';
-        strings = await scanFileForStrings();
-        statusEl.textContent = `Found ${strings.length} strings by scanning file.`;
-      }
-
-      // Enable search & download buttons
-      searchInput.disabled = false;
+      table.innerHTML = '';
+      loading.textContent = `Loading metadata file (${(file.size / 1024 / 1024).toFixed(2)} MB)...`;
+      progress.style.width = '0%';
       downloadBtn.disabled = true;
-      modifiedCount = 0;
 
-      // Render strings
-      await renderTableBatch();
+      fileBuffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(fileBuffer);
 
-    } catch (err) {
-      alert('Error reading file: ' + err.message);
-      resetState();
-    }
-  }
+      const strings = [];
+      let i = 0;
+      const step = 5000; // # of bytes per chunk
 
-  function resetState() {
-    fileBuffer = null;
-    uint8Data = null;
-    strings = [];
-    metadataHeader = null;
-    stringLiteralTable = null;
-    modifiedCount = 0;
-    stringsTableBody.innerHTML = '';
-    searchInput.value = '';
-    searchInput.disabled = true;
-    downloadBtn.disabled = true;
-    statusEl.textContent = '';
-  }
+      function isPrintable(charCode) {
+        return charCode >= 32 && charCode < 127;
+      }
 
-  // --- Event Listeners ---
+      function processChunk() {
+        const start = i;
+        const end = Math.min(i + step, bytes.length);
+        let currentString = '';
 
-  fileInput.addEventListener('change', handleFileLoad);
+        while (i < end) {
+          const byte = bytes[i];
+          if (isPrintable(byte)) {
+            currentString += String.fromCharCode(byte);
+          } else {
+            if (currentString.length >= 4) {
+              strings.push({ offset: i - currentString.length, value: currentString });
+              if (strings.length <= 1000) {
+                addToTable(strings[strings.length - 1]);
+              }
+            }
+            currentString = '';
+          }
+          i++;
+        }
 
-  searchInput.addEventListener('input', async (e) => {
-    const val = e.target.value;
-    await renderTableBatch(val);
-  });
+        const percent = ((i / bytes.length) * 100).toFixed(1);
+        progress.style.width = percent + '%';
 
-  downloadBtn.addEventListener('click', () => {
-    saveModifiedFile();
-  });
+        if (i < bytes.length) {
+          setTimeout(processChunk, 0);
+        } else {
+          originalStrings = strings;
+          modifiedStrings = strings.map(s => s.value);
+          loading.textContent = `Loaded ${strings.length} strings.`;
+          downloadBtn.disabled = false;
+        }
+      }
 
-</script>
+      function addToTable(entry) {
+        const input = document.createElement('input');
+        input.value = entry.value;
+        input.addEventListener('input', e => {
+          const index = originalStrings.findIndex(s => s.offset === entry.offset);
+          modifiedStrings[index] = e.target.value;
+        });
+
+        const original = document.createElement('input');
+        original.value = entry.value;
+        original.disabled = true;
+
+        table.appendChild(original);
+        table.appendChild(input);
+      }
+
+      processChunk();
+    });
+
+    search.addEventListener('input', e => {
+      const query = e.target.value.toLowerCase();
+      table.innerHTML = '';
+      originalStrings.forEach((entry, idx) => {
+        if (entry.value.toLowerCase().includes(query)) {
+          const original = document.createElement('input');
+          original.value = entry.value;
+          original.disabled = true;
+
+          const input = document.createElement('input');
+          input.value = modifiedStrings[idx];
+          input.addEventListener('input', ev => {
+            modifiedStrings[idx] = ev.target.value;
+          });
+
+          table.appendChild(original);
+          table.appendChild(input);
+        }
+      });
+    });
+
+    downloadBtn.addEventListener('click', () => {
+      const out = new Uint8Array(fileBuffer);
+      modifiedStrings.forEach((str, idx) => {
+        const orig = originalStrings[idx];
+        const bytes = new TextEncoder().encode(str);
+        if (bytes.length <= orig.value.length) {
+          out.set(bytes, orig.offset);
+        }
+      });
+
+      const blob = new Blob([out], { type: 'application/octet-stream' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'modified-global-metadata.dat';
+      a.click();
+    });
+  </script>
 </body>
 </html>
