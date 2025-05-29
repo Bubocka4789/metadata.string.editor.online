@@ -1,60 +1,209 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Il2Cpp Metadata String Editor – Web</title>
+  <meta charset="UTF-8">
+  <title>Il2Cpp Metadata String Editor</title>
   <style>
-    body{margin:0;font-family:monospace;background:#181818;color:#eee}
-    header{display:flex;align-items:center;gap:.5rem;padding:.75rem;background:#242424;flex-wrap:wrap}
-    header>input[type=file]{flex:0 0 auto}
-    header button{padding:.4rem .8rem;border:none;border-radius:4px;font-weight:bold;cursor:pointer;font-size:.9rem}
-    header button:disabled{opacity:.45;cursor:not-allowed}
-    #btnSave{background:#2e8b57;color:#fff}
-    #btnIDE{background:#0066cc;color:#fff}
-    #btnStore{background:#555}
-    #btnClear{background:#aa0000;color:#fff;margin-left:auto}
-    #progressWrap{width:100%;height:14px;background:#333;border-radius:7px;overflow:hidden;margin:.4rem 0}
-    #progress{height:100%;width:0;background:#00b7ff;transition:width .15s}
-    #search{flex:1 1 260px;padding:.25rem .5rem;background:#1b1b1b;border:1px solid #444;color:#eee;border-radius:4px}
-    #tableWrap{height:calc(100vh - 140px);overflow:auto}
-    table{border-collapse:collapse;width:100%}
-    th,td{border:1px solid #333;padding:.3rem .4rem;vertical-align:top}
-    th{background:#303030;position:sticky;top:0;z-index:2}
-    td.orig{color:#aaa;background:#202020;white-space:pre-wrap;word-break:break-word}
-    textarea.edit{width:100%;min-height:2.2em;background:#282828;color:#eee;border:none;resize:vertical;font-family:monospace}
-    textarea.edit:focus{outline:2px solid #00b7ff}
+    body {
+      font-family: sans-serif;
+      padding: 20px;
+    }
+    #progress-container {
+      width: 100%;
+      background: #eee;
+      height: 20px;
+      margin-bottom: 10px;
+      display: none;
+    }
+    #progress-bar {
+      height: 100%;
+      width: 0%;
+      background: #76c7c0;
+    }
+    .string-entry {
+      margin: 5px 0;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .string-entry span {
+      width: 50px;
+      font-weight: bold;
+    }
+    .string-entry input {
+      width: 80%;
+    }
+    #string-list {
+      max-height: 600px;
+      overflow-y: auto;
+      border: 1px solid #ccc;
+      padding: 10px;
+    }
+    #buttons {
+      margin-top: 20px;
+    }
   </style>
 </head>
 <body>
-<header>
-  <input type="file" id="fileInput" accept=".dat" />
-  <input id="search" placeholder="Search (case‑sensitive)…" disabled />
-  <button id="btnSave" disabled>Download patched dat</button>
-  <button id="btnIDE" disabled>Download .ide</button>
-  <button id="btnStore" disabled>Save to LocalStorage</button>
-  <button id="btnClear" title="Clear LocalStorage">×</button>
-  <div id="progressWrap"><div id="progress"></div></div>
-</header>
-<div id="tableWrap"><table id="tbl"><thead><tr><th>#</th><th>Original</th><th>Modified</th></tr></thead><tbody></tbody></table></div>
+
+<h2>Il2Cpp Metadata String Editor</h2>
+
+<input type="file" id="metadata-file" />
+<div id="progress-container">
+  <div id="progress-bar"></div>
+</div>
+<div id="string-list"></div>
+
+<div id="buttons">
+  <button id="save-button-dat">Save as global-metadata.dat</button>
+  <button id="save-button-ide">Save as storage.ide</button>
+</div>
+
 <script>
-const BATCH=60;let buf,dv,offsetTable=[],strings=[],mods={},parsed=false;
-const ui={file:qs('#fileInput'),search:qs('#search'),save:qs('#btnSave'),ide:qs('#btnIDE'),store:qs('#btnStore'),clear:qs('#btnClear'),prog:qs('#progress'),tbody:qs('#tbl tbody'),wrap:qs('#tableWrap')};
-function qs(s){return document.querySelector(s)}
-ui.file.onchange=e=>{if(!e.target.files[0])return;reset();const fr=new FileReader();fr.onload=ev=>{buf=ev.target.result;dv=new DataView(buf);if(!parseHeader())return;incrementalLoad();};fr.readAsArrayBuffer(e.target.files[0])};
-function reset(){offsetTable=[];strings=[];mods={};parsed=false;ui.tbody.innerHTML='';ui.save.disabled=ui.ide.disabled=ui.store.disabled=true;ui.search.disabled=true;ui.prog.style.width='0%'}
-function parseHeader(){try{const magic=dv.getUint32(0,true);if(magic!==0xFAB11BAF&&magic!==0xFAB11BFA)throw'bad magic';const ver=dv.getUint32(4,true);const litCount=dv.getUint32(8,true);const litOff=dv.getUint32(12,true);if(litCount<1||litOff+litCount*8>buf.byteLength)throw'bad literal table';// read offsets table ptr heuristically
-let strCount=dv.getUint32(0x10,true);let offTable=dv.getUint32(0x14,true);if(strCount<1||offTable+strCount*4>buf.byteLength){strCount=litCount;offTable=litOff;}
-for(let i=0;i<strCount;i++){const off=dv.getUint32(offTable+i*4,true);offsetTable.push(off)}return true}catch(err){alert('Parse failed: '+err);return false}}
-function readStr(off){if(off<4||off>=buf.byteLength)return'';const len=dv.getUint32(off-4,true);if(len<=0||off+len>buf.byteLength)return'';return new TextDecoder('utf-8').decode(new Uint8Array(buf,off,len))}
-async function incrementalLoad(){parsed=true;ui.search.disabled=false;ui.ide.disabled=ui.store.disabled=false;for(let i=0;i<offsetTable.length;i+=BATCH){const frag=document.createDocumentFragment();for(let j=i;j<Math.min(i+BATCH,offsetTable.length);j++){const txt=readStr(offsetTable[j]);strings[j]=txt;const tr=document.createElement('tr');tr.innerHTML=`<td>${j}</td><td class="orig"></td><td></td>`;tr.children[1].textContent=txt;const ta=document.createElement('textarea');ta.className='edit';ta.value=(mods[j]??txt);ta.dataset.idx=j;ta.oninput=e=>{const id=parseInt(e.target.dataset.idx);const val=e.target.value;mods[id]=val===strings[id]?undefined:val;ui.save.disabled=Object.values(mods).every(v=>v===undefined);ui.ide.disabled=ui.save.disabled;ui.store.disabled=ui.save.disabled};tr.children[2].appendChild(ta);frag.appendChild(tr);}ui.tbody.appendChild(frag);ui.prog.style.width=((i+BATCH)/offsetTable.length*100).toFixed(1)+'%';await new Promise(r=>setTimeout(r,0));}
-ui.prog.style.width='100%';}
-ui.search.oninput=()=>{const q=ui.search.value;[...ui.tbody.rows].forEach(r=>{const idx=parseInt(r.cells[0].textContent);const txt=strings[idx];const mod=mods[idx]??txt;r.style.display=(txt.includes(q)||mod.includes(q))?'':'none'})};
-ui.save.onclick=()=>downloadPatched();ui.ide.onclick=()=>downloadIDE();ui.store.onclick=()=>{localStorage.setItem('mdseMods',JSON.stringify(mods));alert('Saved edits to LocalStorage');};ui.clear.onclick=()=>{localStorage.removeItem('mdseMods');alert('LocalStorage cleared');};
-function downloadIDE(){const obj={modified:Object.fromEntries(Object.entries(mods).filter(([,v])=>v!==undefined))};const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});triggerDownload(blob,'storage.ide');}
-function triggerDownload(blob,name){const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;a.click();URL.revokeObjectURL(url)}
-function downloadPatched(){const changed=Object.entries(mods).filter(([,v])=>v!==undefined);if(changed.length===0)return alert('No changes');let newBuf=new Uint8Array(buf.byteLength+1024*1024*5);newBuf.set(new Uint8Array(buf));let cursor=buf.byteLength;changed.forEach(([idxStr,newVal])=>{const idx=parseInt(idxStr);const encoded=new TextEncoder().encode(newVal);new DataView(newBuf.buffer).setUint32(cursor,encoded.length,true);cursor+=4;newBuf.set(encoded,cursor);offsetTable[idx]=cursor;cursor+=encoded.length;});offsetTable.forEach((off,i)=>{dv.setUint32(0x14+i*4,off,true)});// write back offsets table
-const final=newBuf.slice(0,cursor);triggerDownload(new Blob([final],{type:'application/octet-stream'}),'global-metadata.patched.dat');}
+  let metadataBuffer;
+  let stringLiterals = [];
+  let parsedStrings = [];
+  let modifiedStrings = [];
+  let originalDatArrayBuffer;
+  let version = 0;
+  let stringLiteralOffset = 0;
+  let stringLiteralCount = 0;
+  let batchSize = 500;
+
+  const progressBar = document.getElementById('progress-bar');
+  const progressContainer = document.getElementById('progress-container');
+  const outputDiv = document.getElementById('string-list');
+
+  document.getElementById('metadata-file').addEventListener('change', handleFileSelect);
+  document.getElementById('save-button-dat').addEventListener('click', saveDatFile);
+  document.getElementById('save-button-ide').addEventListener('click', saveIDEFile);
+
+  function handleFileSelect(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      metadataBuffer = e.target.result;
+      originalDatArrayBuffer = metadataBuffer.slice(0);
+      stringLiterals = [];
+      parsedStrings = [];
+      modifiedStrings = [];
+      outputDiv.innerHTML = '';
+
+      try {
+        parseMetadataHeader();
+        renderStringsIncrementally();
+      } catch (error) {
+        alert("Failed to parse metadata: " + error.message);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function parseMetadataHeader() {
+    const dataView = new DataView(metadataBuffer);
+    version = dataView.getInt32(4, true);
+    stringLiteralOffset = dataView.getUint32(0x20, true);
+    stringLiteralCount = dataView.getUint32(0x24, true);
+
+    if (stringLiteralCount <= 0 || stringLiteralCount > 1000000) {
+      throw new Error("Invalid string literal count: " + stringLiteralCount);
+    }
+
+    for (let i = 0; i < stringLiteralCount; i++) {
+      const offset = stringLiteralOffset + i * 8;
+      const stringOffset = new DataView(metadataBuffer, offset, 4).getUint32(0, true);
+      const stringLength = new DataView(metadataBuffer, offset + 4, 4).getUint32(0, true);
+      stringLiterals.push({ offset: stringOffset, length: stringLength, index: i });
+    }
+  }
+
+  function renderStringsIncrementally(startIndex = 0) {
+    progressContainer.style.display = 'block';
+    const fragment = document.createDocumentFragment();
+
+    for (let i = startIndex; i < Math.min(startIndex + batchSize, stringLiterals.length); i++) {
+      const { offset, length, index } = stringLiterals[i];
+      let stringText = '';
+      try {
+        const stringBytes = new Uint8Array(metadataBuffer, offset, length);
+        stringText = new TextDecoder().decode(stringBytes);
+      } catch (e) {
+        stringText = '[Invalid String]';
+      }
+
+      const div = document.createElement('div');
+      div.className = 'string-entry';
+      div.innerHTML = `
+        <span>#${index}</span>
+        <input type="text" data-index="${index}" value="${stringText}">
+      `;
+      fragment.appendChild(div);
+      parsedStrings[index] = stringText;
+      modifiedStrings[index] = stringText;
+    }
+
+    outputDiv.appendChild(fragment);
+    const percent = Math.floor(((startIndex + batchSize) / stringLiterals.length) * 100);
+    progressBar.style.width = `${percent}%`;
+
+    if (startIndex + batchSize < stringLiterals.length) {
+      setTimeout(() => renderStringsIncrementally(startIndex + batchSize), 10);
+    } else {
+      progressContainer.style.display = 'none';
+    }
+  }
+
+  outputDiv.addEventListener('input', e => {
+    if (e.target.tagName === 'INPUT') {
+      const index = e.target.getAttribute('data-index');
+      modifiedStrings[index] = e.target.value;
+    }
+  });
+
+  function saveIDEFile() {
+    const changes = {};
+    for (let i = 0; i < modifiedStrings.length; i++) {
+      if (modifiedStrings[i] !== parsedStrings[i]) {
+        changes[i] = modifiedStrings[i];
+      }
+    }
+    const blob = new Blob([JSON.stringify(changes, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'storage.ide';
+    a.click();
+  }
+
+  function saveDatFile() {
+    const newBuffer = new ArrayBuffer(originalDatArrayBuffer.byteLength + 10 * 1024 * 1024);
+    const newDataView = new DataView(newBuffer);
+    new Uint8Array(newBuffer).set(new Uint8Array(originalDatArrayBuffer));
+
+    let appendOffset = originalDatArrayBuffer.byteLength;
+    for (let i = 0; i < stringLiterals.length; i++) {
+      if (modifiedStrings[i] !== parsedStrings[i]) {
+        const newString = new TextEncoder().encode(modifiedStrings[i]);
+        new Uint8Array(newBuffer, appendOffset, newString.length).set(newString);
+
+        // Update offset and length in Il2CppStringLiteral
+        const entryOffset = stringLiteralOffset + i * 8;
+        newDataView.setUint32(entryOffset, appendOffset, true);
+        newDataView.setUint32(entryOffset + 4, newString.length, true);
+
+        appendOffset += newString.length;
+      }
+    }
+
+    const trimmedBuffer = newBuffer.slice(0, appendOffset);
+    const blob = new Blob([trimmedBuffer], { type: 'application/octet-stream' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'global-metadata-modified.dat';
+    a.click();
+  }
 </script>
+
 </body>
 </html>
