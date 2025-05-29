@@ -1,160 +1,231 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Il2Cpp Metadata String Editor</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Il2Cpp Metadata Editor</title>
   <style>
-    body { font-family: sans-serif; margin: 20px; }
-    textarea { width: 100%; height: 80px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-    td, th { border: 1px solid #ccc; padding: 5px; }
-    .modified { background-color: #ffe4b2; }
-    .controls { margin-top: 10px; }
+    body {
+      font-family: sans-serif;
+      margin: 0;
+      background-color: #121212;
+      color: white;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1rem;
+      background: #1f1f1f;
+    }
+    .controls {
+      display: flex;
+      gap: 10px;
+    }
+    input[type="file"],
+    input[type="text"],
+    button {
+      padding: 8px;
+      border: none;
+      border-radius: 5px;
+    }
+    input[type="text"] {
+      width: 200px;
+    }
+    button {
+      cursor: pointer;
+      background: #3a3a3a;
+      color: white;
+    }
+    button:hover {
+      background: #555;
+    }
+    #stringList {
+      height: 80vh;
+      overflow: auto;
+      padding: 1rem;
+    }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      border-bottom: 1px solid #333;
+      padding: 5px 0;
+    }
+    .row input {
+      width: 45%;
+      background: #222;
+      color: white;
+      border: 1px solid #444;
+    }
   </style>
 </head>
 <body>
-  <h1>Il2Cpp Metadata String Editor (v29+ Supported)</h1>
-  <input type="file" id="fileInput" />
-  <div class="controls">
-    <button id="saveDat" disabled>💾 Save .dat</button>
-    <button id="saveIde" disabled>💾 Save .ide</button>
-  </div>
-  <table id="stringTable">
-    <thead>
-      <tr><th>#</th><th>Original</th><th>Modified</th></tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+  <header>
+    <h1>Il2Cpp Metadata Editor</h1>
+    <div class="controls">
+      <input type="file" id="fileInput" />
+      <input type="text" id="searchInput" placeholder="Search..." />
+      <button id="toggleTheme">Dark Mode</button>
+      <button id="saveDAT" disabled>Save .dat</button>
+      <button id="saveIDE" disabled>Save .ide</button>
+    </div>
+  </header>
+  <div id="stringList"></div>
+
   <script>
-    const fileInput = document.getElementById('fileInput');
-    const tableBody = document.querySelector('#stringTable tbody');
-    const saveDatBtn = document.getElementById('saveDat');
-    const saveIdeBtn = document.getElementById('saveIde');
+    let originalStrings = [];
+    let stringOffsets = [];
+    let modifiedStrings = {};
+    let baseBuffer, metadataView;
+    let virtualScrollAnchor = 0;
 
-    let originalFile;
-    let modifiedStrings = [];
+    document.getElementById('fileInput').addEventListener('change', handleFile);
+    document.getElementById('saveDAT').addEventListener('click', saveDAT);
+    document.getElementById('saveIDE').addEventListener('click', saveIDE);
+    document.getElementById('toggleTheme').addEventListener('click', toggleDarkMode);
+    document.getElementById('searchInput').addEventListener('input', renderList);
 
-    fileInput.addEventListener('change', () => {
-      const file = fileInput.files[0];
-      if (!file) return;
-
-      originalFile = file;
-      tableBody.innerHTML = '';
-      modifiedStrings = [];
-
+    function handleFile(e) {
+      const file = e.target.files[0];
       const reader = new FileReader();
-      reader.onload = function (e) {
-        const buffer = new Uint8Array(e.target.result);
-        extractStringsLive(buffer);
+      reader.onload = () => {
+        baseBuffer = reader.result;
+        metadataView = new DataView(baseBuffer);
+        parseStrings(metadataView);
       };
       reader.readAsArrayBuffer(file);
-    });
-
-    function extractStringsLive(buffer) {
-      const minLen = 4;
-      const strings = [];
-      let str = '';
-      let offset = 0;
-      let shown = 0;
-
-      function isPrintable(c) {
-        return c >= 0x20 && c <= 0x7E;
-      }
-
-      function flushString() {
-        if (str.length >= minLen) {
-          const index = strings.length;
-          strings.push(str);
-          modifiedStrings.push(str);
-          const tr = document.createElement('tr');
-          tr.innerHTML = `<td>${index}</td>
-            <td>${str}</td>
-            <td><input data-idx="${index}" value="${str}" /></td>`;
-          tableBody.appendChild(tr);
-        }
-        str = '';
-      }
-
-      const batchSize = 100000;
-      const chunk = () => {
-        for (let i = offset; i < offset + batchSize && i < buffer.length; i++) {
-          const c = buffer[i];
-          if (isPrintable(c)) {
-            str += String.fromCharCode(c);
-          } else {
-            flushString();
-          }
-        }
-        flushString();
-        offset += batchSize;
-        if (offset < buffer.length) {
-          requestAnimationFrame(chunk);
-        } else {
-          saveDatBtn.disabled = false;
-          saveIdeBtn.disabled = false;
-        }
-      };
-      chunk();
     }
 
-    tableBody.addEventListener('input', (e) => {
-      if (e.target.tagName === 'INPUT') {
-        const idx = +e.target.dataset.idx;
-        modifiedStrings[idx] = e.target.value;
-        e.target.closest('tr').classList.add('modified');
-      }
-    });
+    function parseStrings(view) {
+      const magic = view.getUint32(0, true);
+      const version = view.getUint32(4, true);
+      const stringLiteralOffset = view.getUint32(0x48, true);
+      const stringLiteralCount = view.getUint32(0x4C, true);
+      const stringDataOffset = view.getUint32(0x54, true);
 
-    saveIdeBtn.addEventListener('click', () => {
-      const lines = [];
-      for (let i = 0; i < modifiedStrings.length; i++) {
-        if (modifiedStrings[i] !== null && modifiedStrings[i] !== '') {
-          lines.push(modifiedStrings[i]);
+      if (magic !== 0xFAB11BAF) {
+        alert('Invalid metadata file');
+        return;
+      }
+
+      originalStrings = [];
+      stringOffsets = [];
+
+      const tableStart = stringLiteralOffset;
+      const entrySize = 8;
+
+      let i = 0;
+      const batchSize = 1000;
+      function processBatch() {
+        const end = Math.min(i + batchSize, stringLiteralCount);
+        for (; i < end; i++) {
+          const entryOffset = tableStart + i * entrySize;
+          const dataOffset = view.getUint32(entryOffset, true);
+          const length = view.getUint32(entryOffset + 4, true);
+
+          const strBytes = new Uint8Array(baseBuffer, stringDataOffset + dataOffset, length);
+          const text = decodeUTF8Safe(strBytes);
+          if (text) {
+            originalStrings.push(text);
+            stringOffsets.push({ entryOffset, dataOffset, length });
+          }
+        }
+
+        renderList();
+        if (i < stringLiteralCount) {
+          setTimeout(processBatch, 0);
+        } else {
+          document.getElementById('saveDAT').disabled = false;
+          document.getElementById('saveIDE').disabled = false;
         }
       }
+
+      processBatch();
+    }
+
+    function decodeUTF8Safe(bytes) {
+      try {
+        const decoder = new TextDecoder('utf-8');
+        const str = decoder.decode(bytes);
+        return /^[\x20-\x7E\s]*$/.test(str) ? str : null;
+      } catch {
+        return null;
+      }
+    }
+
+    function renderList() {
+      const list = document.getElementById('stringList');
+      list.innerHTML = '';
+      const query = document.getElementById('searchInput').value.toLowerCase();
+
+      const fragment = document.createDocumentFragment();
+
+      originalStrings.forEach((str, idx) => {
+        if (!str.includes(query)) return;
+        const row = document.createElement('div');
+        row.className = 'row';
+
+        const original = document.createElement('input');
+        original.value = str;
+        original.disabled = true;
+
+        const modified = document.createElement('input');
+        modified.value = modifiedStrings[idx] || str;
+        modified.oninput = () => {
+          modifiedStrings[idx] = modified.value;
+        };
+
+        row.appendChild(original);
+        row.appendChild(modified);
+        fragment.appendChild(row);
+      });
+
+      list.appendChild(fragment);
+    }
+
+    function saveDAT() {
+      const newBuffer = new Uint8Array(baseBuffer.byteLength + 5 * 1024 * 1024);
+      newBuffer.set(new Uint8Array(baseBuffer));
+
+      const view = new DataView(newBuffer.buffer);
+      let appendOffset = baseBuffer.byteLength;
+
+      for (const [index, newStr] of Object.entries(modifiedStrings)) {
+        const i = parseInt(index);
+        const utf8 = new TextEncoder().encode(newStr);
+        const offset = appendOffset - view.getUint32(0x54, true);
+        view.setUint32(stringOffsets[i].entryOffset, offset, true);
+        view.setUint32(stringOffsets[i].entryOffset + 4, utf8.length, true);
+        newBuffer.set(utf8, appendOffset);
+        appendOffset += utf8.length;
+      }
+
+      const blob = new Blob([newBuffer.slice(0, appendOffset)], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'global-metadata.dat';
+      a.click();
+    }
+
+    function saveIDE() {
+      const lines = [];
+      for (const [index, str] of Object.entries(modifiedStrings)) {
+        const orig = originalStrings[index];
+        lines.push(`${orig} => ${str}`);
+      }
+
       const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download = 'storage.ide';
       a.click();
-      URL.revokeObjectURL(url);
-    });
+    }
 
-    saveDatBtn.addEventListener('click', () => {
-      const reader = new FileReader();
-      reader.onload = function (e) {
-        const original = new Uint8Array(e.target.result);
-        const encoder = new TextEncoder();
-        const modified = new Uint8Array(original);
-
-        const addedStrings = [];
-        const baseOffset = original.length;
-        let writePtr = baseOffset;
-
-        for (let i = 0; i < modifiedStrings.length; i++) {
-          const modStr = modifiedStrings[i];
-          const origStr = tableBody.rows[i].cells[1].textContent;
-          if (modStr !== origStr) {
-            const encoded = encoder.encode(modStr + '\0');
-            addedStrings.push(...encoded);
-          }
-        }
-
-        const finalBuffer = new Uint8Array(original.length + addedStrings.length);
-        finalBuffer.set(original, 0);
-        finalBuffer.set(addedStrings, original.length);
-
-        const blob = new Blob([finalBuffer], { type: 'application/octet-stream' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'global-metadata-modified.dat';
-        a.click();
-        URL.revokeObjectURL(url);
-      };
-      reader.readAsArrayBuffer(originalFile);
-    });
+    function toggleDarkMode() {
+      document.body.classList.toggle('dark');
+    }
   </script>
 </body>
 </html>
