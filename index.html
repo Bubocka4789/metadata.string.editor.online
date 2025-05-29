@@ -2,229 +2,222 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Il2Cpp Metadata Editor</title>
+  <title>Il2Cpp Metadata String Editor</title>
   <style>
     body {
       font-family: sans-serif;
       margin: 0;
+      padding: 0;
+      background-color: #f2f2f2;
+      color: #000;
+    }
+
+    body.dark-mode {
       background-color: #121212;
-      color: white;
+      color: #ddd;
     }
-    header {
+
+    #controls {
       display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 1rem;
-      background: #1f1f1f;
-    }
-    .controls {
-      display: flex;
+      padding: 10px;
       gap: 10px;
+      background-color: #e0e0e0;
     }
-    input[type="file"],
-    input[type="text"],
-    button {
-      padding: 8px;
-      border: none;
-      border-radius: 5px;
+
+    body.dark-mode #controls {
+      background-color: #1e1e1e;
     }
-    input[type="text"] {
-      width: 200px;
+
+    #output {
+      max-height: 80vh;
+      overflow-y: auto;
+      padding: 10px;
     }
-    button {
-      cursor: pointer;
-      background: #3a3a3a;
-      color: white;
-    }
-    button:hover {
-      background: #555;
-    }
-    #stringList {
-      height: 80vh;
-      overflow: auto;
-      padding: 1rem;
-    }
+
     .row {
       display: flex;
-      justify-content: space-between;
-      border-bottom: 1px solid #333;
-      padding: 5px 0;
+      gap: 10px;
+      margin-bottom: 4px;
+      align-items: center;
     }
+
+    .row span {
+      flex: 0 0 50px;
+    }
+
     .row input {
-      width: 45%;
-      background: #222;
-      color: white;
-      border: 1px solid #444;
+      flex: 1;
+      padding: 4px;
+    }
+
+    button {
+      padding: 5px 10px;
+    }
+
+    #progress {
+      margin-top: 5px;
+    }
+
+    #search {
+      padding: 5px;
+      width: 200px;
     }
   </style>
 </head>
 <body>
-  <header>
-    <h1>Il2Cpp Metadata Editor</h1>
-    <div class="controls">
-      <input type="file" id="fileInput" />
-      <input type="text" id="searchInput" placeholder="Search..." />
-      <button id="toggleTheme">Dark Mode</button>
-      <button id="saveDAT" disabled>Save .dat</button>
-      <button id="saveIDE" disabled>Save .ide</button>
-    </div>
-  </header>
-  <div id="stringList"></div>
+  <div id="controls">
+    <input type="file" id="fileInput" />
+    <button onclick="downloadDAT()">Save .dat</button>
+    <button onclick="downloadIDE()">Save .ide</button>
+    <input id="search" type="text" placeholder="Search..." />
+    <button onclick="toggleDarkMode()">🌙</button>
+  </div>
+  <div id="progress"></div>
+  <div id="output"></div>
 
   <script>
-    let originalStrings = [];
-    let stringOffsets = [];
-    let modifiedStrings = {};
-    let baseBuffer, metadataView;
-    let virtualScrollAnchor = 0;
+    let strings = [];
+    let modified = new Map();
+    let fileData = null;
+    let originalFile = null;
 
-    document.getElementById('fileInput').addEventListener('change', handleFile);
-    document.getElementById('saveDAT').addEventListener('click', saveDAT);
-    document.getElementById('saveIDE').addEventListener('click', saveIDE);
-    document.getElementById('toggleTheme').addEventListener('click', toggleDarkMode);
-    document.getElementById('searchInput').addEventListener('input', renderList);
+    const fileInput = document.getElementById('fileInput');
+    const output = document.getElementById('output');
+    const progress = document.getElementById('progress');
+    const searchInput = document.getElementById('search');
 
-    function handleFile(e) {
+    fileInput.addEventListener('change', (e) => {
       const file = e.target.files[0];
+      if (!file) return;
+
       const reader = new FileReader();
-      reader.onload = () => {
-        baseBuffer = reader.result;
-        metadataView = new DataView(baseBuffer);
-        parseStrings(metadataView);
+      reader.onload = async function () {
+        fileData = new Uint8Array(reader.result);
+        originalFile = fileData.slice();
+        parseMetadata(fileData);
       };
       reader.readAsArrayBuffer(file);
+    });
+
+    searchInput.addEventListener('input', () => {
+      renderStrings(searchInput.value.toLowerCase());
+    });
+
+    function toggleDarkMode() {
+      document.body.classList.toggle('dark-mode');
     }
 
-    function parseStrings(view) {
-      const magic = view.getUint32(0, true);
-      const version = view.getUint32(4, true);
-      const stringLiteralOffset = view.getUint32(0x48, true);
-      const stringLiteralCount = view.getUint32(0x4C, true);
-      const stringDataOffset = view.getUint32(0x54, true);
-
-      if (magic !== 0xFAB11BAF) {
-        alert('Invalid metadata file');
+    function parseMetadata(bytes) {
+      const magic = new DataView(bytes.buffer).getUint32(0, true);
+      const version = new DataView(bytes.buffer).getInt32(4, true);
+      if (magic !== 0xFAB11BAF && magic !== 0xFAB11BFA) {
+        alert("Invalid metadata file.");
         return;
       }
 
-      originalStrings = [];
-      stringOffsets = [];
+      const stringLiteralOffset = new DataView(bytes.buffer).getUint32(0x30, true);
+      const stringLiteralCount = new DataView(bytes.buffer).getUint32(0x34, true);
 
-      const tableStart = stringLiteralOffset;
-      const entrySize = 8;
+      if (stringLiteralCount > 1000000) {
+        alert("Warning: Very large string literal count. Will only load first 10,000 for performance.");
+      }
 
-      let i = 0;
-      const batchSize = 1000;
-      function processBatch() {
-        const end = Math.min(i + batchSize, stringLiteralCount);
-        for (; i < end; i++) {
-          const entryOffset = tableStart + i * entrySize;
-          const dataOffset = view.getUint32(entryOffset, true);
-          const length = view.getUint32(entryOffset + 4, true);
+      strings = [];
+      const limit = Math.min(stringLiteralCount, 10000);
 
-          const strBytes = new Uint8Array(baseBuffer, stringDataOffset + dataOffset, length);
-          const text = decodeUTF8Safe(strBytes);
-          if (text) {
-            originalStrings.push(text);
-            stringOffsets.push({ entryOffset, dataOffset, length });
+      const view = new DataView(bytes.buffer);
+
+      for (let i = 0; i < limit; i++) {
+        const entryOffset = stringLiteralOffset + i * 8;
+        const dataOffset = view.getUint32(entryOffset, true);
+        const length = view.getUint32(entryOffset + 4, true);
+        if (dataOffset === 0 || length === 0) continue;
+
+        const stringBytes = bytes.slice(dataOffset, dataOffset + length);
+        try {
+          const decoded = new TextDecoder("utf-8").decode(stringBytes);
+          if (/^[\x20-\x7E\s]{1,200}$/.test(decoded)) {
+            strings.push({ index: i, offset: dataOffset, length, value: decoded });
           }
-        }
-
-        renderList();
-        if (i < stringLiteralCount) {
-          setTimeout(processBatch, 0);
-        } else {
-          document.getElementById('saveDAT').disabled = false;
-          document.getElementById('saveIDE').disabled = false;
-        }
+        } catch {}
       }
 
-      processBatch();
+      renderStrings();
     }
 
-    function decodeUTF8Safe(bytes) {
-      try {
-        const decoder = new TextDecoder('utf-8');
-        const str = decoder.decode(bytes);
-        return /^[\x20-\x7E\s]*$/.test(str) ? str : null;
-      } catch {
-        return null;
-      }
-    }
-
-    function renderList() {
-      const list = document.getElementById('stringList');
-      list.innerHTML = '';
-      const query = document.getElementById('searchInput').value.toLowerCase();
-
+    function renderStrings(filter = '') {
+      output.innerHTML = '';
       const fragment = document.createDocumentFragment();
+      let shown = 0;
 
-      originalStrings.forEach((str, idx) => {
-        if (!str.includes(query)) return;
+      for (const entry of strings) {
+        if (filter && !entry.value.toLowerCase().includes(filter)) continue;
+
         const row = document.createElement('div');
         row.className = 'row';
 
-        const original = document.createElement('input');
-        original.value = str;
-        original.disabled = true;
+        const indexSpan = document.createElement('span');
+        indexSpan.textContent = entry.index;
+        row.appendChild(indexSpan);
 
-        const modified = document.createElement('input');
-        modified.value = modifiedStrings[idx] || str;
-        modified.oninput = () => {
-          modifiedStrings[idx] = modified.value;
-        };
+        const input = document.createElement('input');
+        input.value = modified.has(entry.index) ? modified.get(entry.index) : entry.value;
+        input.addEventListener('input', () => {
+          modified.set(entry.index, input.value);
+        });
+        row.appendChild(input);
 
-        row.appendChild(original);
-        row.appendChild(modified);
         fragment.appendChild(row);
-      });
-
-      list.appendChild(fragment);
-    }
-
-    function saveDAT() {
-      const newBuffer = new Uint8Array(baseBuffer.byteLength + 5 * 1024 * 1024);
-      newBuffer.set(new Uint8Array(baseBuffer));
-
-      const view = new DataView(newBuffer.buffer);
-      let appendOffset = baseBuffer.byteLength;
-
-      for (const [index, newStr] of Object.entries(modifiedStrings)) {
-        const i = parseInt(index);
-        const utf8 = new TextEncoder().encode(newStr);
-        const offset = appendOffset - view.getUint32(0x54, true);
-        view.setUint32(stringOffsets[i].entryOffset, offset, true);
-        view.setUint32(stringOffsets[i].entryOffset + 4, utf8.length, true);
-        newBuffer.set(utf8, appendOffset);
-        appendOffset += utf8.length;
+        shown++;
+        if (shown > 1000) break; // limit on render per pass
       }
 
-      const blob = new Blob([newBuffer.slice(0, appendOffset)], { type: 'application/octet-stream' });
+      output.appendChild(fragment);
+      progress.textContent = `Showing ${shown} of ${strings.length} strings.`;
+    }
+
+    function downloadDAT() {
+      if (!originalFile) return;
+
+      const newData = new Uint8Array(originalFile.length + 1000000);
+      newData.set(originalFile);
+      let appendOffset = originalFile.length;
+      const view = new DataView(newData.buffer);
+
+      for (const entry of strings) {
+        if (!modified.has(entry.index)) continue;
+        const newString = modified.get(entry.index);
+        const encoded = new TextEncoder().encode(newString);
+        const stringLiteralOffset = 0x30;
+        const entryOffset = new DataView(originalFile.buffer).getUint32(stringLiteralOffset, true) + entry.index * 8;
+
+        view.setUint32(entryOffset, appendOffset, true);
+        view.setUint32(entryOffset + 4, encoded.length, true);
+        newData.set(encoded, appendOffset);
+        appendOffset += encoded.length;
+      }
+
+      const blob = new Blob([newData.slice(0, appendOffset)], { type: 'application/octet-stream' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = 'global-metadata.dat';
+      a.download = 'global-metadata-edited.dat';
       a.click();
     }
 
-    function saveIDE() {
-      const lines = [];
-      for (const [index, str] of Object.entries(modifiedStrings)) {
-        const orig = originalStrings[index];
-        lines.push(`${orig} => ${str}`);
+    function downloadIDE() {
+      const output = [];
+      for (const entry of strings) {
+        if (modified.has(entry.index)) {
+          output.push(`#${entry.index}\n${modified.get(entry.index)}\n`);
+        }
       }
 
-      const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
+      const blob = new Blob([output.join('\n')], { type: 'text/plain' });
       const a = document.createElement('a');
-      a.href = url;
-      a.download = 'storage.ide';
+      a.href = URL.createObjectURL(blob);
+      a.download = 'strings.ide';
       a.click();
-    }
-
-    function toggleDarkMode() {
-      document.body.classList.toggle('dark');
     }
   </script>
 </body>
