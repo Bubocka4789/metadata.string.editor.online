@@ -68,7 +68,7 @@
   <input type="text" id="search" placeholder="Case-sensitive search..." />
   <button id="saveBtn" disabled>Save Modified File</button>
   <div id="progressBar"><div></div></div>
-  <div id="version">v1.3.3</div>
+  <div id="version">v1.4.0</div>
 </header>
 <div id="container">
   <div id="stringsTable">
@@ -111,9 +111,9 @@
   }
 
   function renderFiltered() {
-    tableBody.innerHTML = '';
     const filter = searchInput.value;
     const frag = document.createDocumentFragment();
+    let count = 0;
     for (let s of stringLiterals) {
       if (filter && !s.original.includes(filter) && !s.modified.includes(filter)) continue;
       const tr = document.createElement('tr');
@@ -137,7 +137,9 @@
       tr.appendChild(tdMod);
 
       frag.appendChild(tr);
+      if (++count > 1000) break; // avoid freezing
     }
+    tableBody.innerHTML = '';
     tableBody.appendChild(frag);
   }
 
