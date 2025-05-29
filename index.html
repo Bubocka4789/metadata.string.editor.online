@@ -1,213 +1,60 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<title>Il2Cpp Metadata String Editor (Incremental Load)</title>
-<style>
-  body {
-    font-family: Arial, sans-serif;
-    margin: 15px;
-  }
-  #fileInput {
-    margin-bottom: 10px;
-  }
-  #progress {
-    margin-bottom: 10px;
-  }
-  #stringsTable {
-    border-collapse: collapse;
-    width: 100%;
-  }
-  #stringsTable th, #stringsTable td {
-    border: 1px solid #ccc;
-    padding: 6px 8px;
-    vertical-align: top;
-  }
-  textarea {
-    width: 100%;
-    font-family: monospace;
-    height: 1.4em;
-    resize: vertical;
-  }
-  #saveBtn {
-    margin-top: 10px;
-  }
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Il2Cpp Metadata String Editor – Web</title>
+  <style>
+    body{margin:0;font-family:monospace;background:#181818;color:#eee}
+    header{display:flex;align-items:center;gap:.5rem;padding:.75rem;background:#242424;flex-wrap:wrap}
+    header>input[type=file]{flex:0 0 auto}
+    header button{padding:.4rem .8rem;border:none;border-radius:4px;font-weight:bold;cursor:pointer;font-size:.9rem}
+    header button:disabled{opacity:.45;cursor:not-allowed}
+    #btnSave{background:#2e8b57;color:#fff}
+    #btnIDE{background:#0066cc;color:#fff}
+    #btnStore{background:#555}
+    #btnClear{background:#aa0000;color:#fff;margin-left:auto}
+    #progressWrap{width:100%;height:14px;background:#333;border-radius:7px;overflow:hidden;margin:.4rem 0}
+    #progress{height:100%;width:0;background:#00b7ff;transition:width .15s}
+    #search{flex:1 1 260px;padding:.25rem .5rem;background:#1b1b1b;border:1px solid #444;color:#eee;border-radius:4px}
+    #tableWrap{height:calc(100vh - 140px);overflow:auto}
+    table{border-collapse:collapse;width:100%}
+    th,td{border:1px solid #333;padding:.3rem .4rem;vertical-align:top}
+    th{background:#303030;position:sticky;top:0;z-index:2}
+    td.orig{color:#aaa;background:#202020;white-space:pre-wrap;word-break:break-word}
+    textarea.edit{width:100%;min-height:2.2em;background:#282828;color:#eee;border:none;resize:vertical;font-family:monospace}
+    textarea.edit:focus{outline:2px solid #00b7ff}
+  </style>
 </head>
 <body>
-
-<h2>Il2Cpp Metadata String Editor</h2>
-
-<input type="file" id="fileInput" accept=".dat" />
-<div id="progress">No file loaded</div>
-
-<table id="stringsTable">
-  <thead>
-    <tr>
-      <th>#</th>
-      <th>Original String</th>
-      <th>Modified String</th>
-    </tr>
-  </thead>
-  <tbody></tbody>
-</table>
-
-<button id="saveBtn" disabled>Save Modified File</button>
-
+<header>
+  <input type="file" id="fileInput" accept=".dat" />
+  <input id="search" placeholder="Search (case‑sensitive)…" disabled />
+  <button id="btnSave" disabled>Download patched dat</button>
+  <button id="btnIDE" disabled>Download .ide</button>
+  <button id="btnStore" disabled>Save to LocalStorage</button>
+  <button id="btnClear" title="Clear LocalStorage">×</button>
+  <div id="progressWrap"><div id="progress"></div></div>
+</header>
+<div id="tableWrap"><table id="tbl"><thead><tr><th>#</th><th>Original</th><th>Modified</th></tr></thead><tbody></tbody></table></div>
 <script>
-const BATCH_SIZE = 50;
-
-let arrayBuffer = null;
-let dataView = null;
-let stringLiteralCount = 0;
-let stringLiteralOffsets = [];
-let stringsData = []; // { original, modified }
-let loadedCount = 0;
-
-const fileInput = document.getElementById('fileInput');
-const progress = document.getElementById('progress');
-const tbody = document.querySelector('#stringsTable tbody');
-const saveBtn = document.getElementById('saveBtn');
-
-fileInput.addEventListener('change', handleFileLoad);
-saveBtn.addEventListener('click', handleSave);
-
-function handleFileLoad(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-
-  const reader = new FileReader();
-  reader.onload = function(evt) {
-    arrayBuffer = evt.target.result;
-    dataView = new DataView(arrayBuffer);
-    resetState();
-    try {
-      parseMetadata();
-    } catch (err) {
-      alert('Failed to parse metadata: ' + err.message);
-      return;
-    }
-    progress.textContent = `Parsing done. Found ${stringLiteralCount} strings. Loading...`;
-    loadStringsBatch();
-  };
-  reader.readAsArrayBuffer(file);
-}
-
-function resetState() {
-  stringLiteralCount = 0;
-  stringLiteralOffsets = [];
-  stringsData = [];
-  loadedCount = 0;
-  tbody.innerHTML = '';
-  saveBtn.disabled = true;
-}
-
-function parseMetadata() {
-  // --- REPLACE with your real parsing logic ---
-  // Example parsing metadata header (adjust for your file format)
-  // We'll pretend:
-  // - At offset 0x00: version number (uint32)
-  // - At offset 0x20: stringLiteralCount (uint32)
-  // - At offset 0x100: string literal offsets table (array of uint32, each is offset to string data)
-  
-  // Basic checks:
-  if (dataView.byteLength < 512) throw new Error("File too small to be valid metadata.");
-
-  // Let's fake read stringLiteralCount at 0x20:
-  stringLiteralCount = dataView.getUint32(0x20, true);
-
-  if (stringLiteralCount <= 0 || stringLiteralCount > 1000000) {
-    throw new Error("Invalid string literal count: " + stringLiteralCount);
-  }
-
-  // Read string literal offsets from 0x100 onwards, one uint32 each:
-  stringLiteralOffsets = [];
-  let offsetsTableStart = 0x100;
-  for (let i = 0; i < stringLiteralCount; i++) {
-    let offset = dataView.getUint32(offsetsTableStart + i * 4, true);
-    if (offset === 0 || offset >= dataView.byteLength) {
-      offset = 0; // Invalid offset - treat as empty string
-    }
-    stringLiteralOffsets.push(offset);
-  }
-  // --- End replace ---
-}
-
-function readIl2CppStringAt(offset) {
-  if (offset === 0 || offset + 4 > dataView.byteLength) return '';
-  const length = dataView.getUint32(offset, true);
-  let chars = [];
-  for (let i = 0; i < length; i++) {
-    const charOffset = offset + 4 + i * 2;
-    if (charOffset + 2 > dataView.byteLength) break;
-    const charCode = dataView.getUint16(charOffset, true);
-    if (charCode === 0) break;
-    chars.push(String.fromCharCode(charCode));
-  }
-  return chars.join('');
-}
-
-function loadStringsBatch() {
-  let batch = [];
-  let count = 0;
-  while (loadedCount < stringLiteralCount && count < BATCH_SIZE) {
-    const offset = stringLiteralOffsets[loadedCount];
-    const originalStr = readIl2CppStringAt(offset);
-    const entry = { index: loadedCount, original: originalStr, modified: originalStr };
-    stringsData[loadedCount] = entry;
-    batch.push(entry);
-    loadedCount++;
-    count++;
-  }
-  appendStringsToTable(batch);
-  progress.textContent = `Loaded strings: ${loadedCount} / ${stringLiteralCount}`;
-
-  if (loadedCount < stringLiteralCount) {
-    setTimeout(loadStringsBatch, 0);
-  } else {
-    progress.textContent = `All ${stringLiteralCount} strings loaded. You can edit and save now.`;
-    saveBtn.disabled = false;
-  }
-}
-
-function appendStringsToTable(batch) {
-  for (const item of batch) {
-    const tr = document.createElement('tr');
-
-    const tdIndex = document.createElement('td');
-    tdIndex.textContent = item.index;
-    tr.appendChild(tdIndex);
-
-    const tdOriginal = document.createElement('td');
-    tdOriginal.textContent = item.original;
-    tr.appendChild(tdOriginal);
-
-    const tdModified = document.createElement('td');
-    const ta = document.createElement('textarea');
-    ta.value = item.modified;
-    ta.dataset.index = item.index;
-    ta.addEventListener('input', (e) => {
-      const idx = parseInt(e.target.dataset.index);
-      stringsData[idx].modified = e.target.value;
-    });
-    tdModified.appendChild(ta);
-    tr.appendChild(tdModified);
-
-    tbody.appendChild(tr);
-  }
-}
-
-function handleSave() {
-  if (!arrayBuffer) return;
-  // Here you should implement your saving logic:
-  // - Compare stringsData.modified vs original
-  // - Update arrayBuffer with modified strings either in place or appended
-  // - Update metadata offsets accordingly
-
-  alert("Save functionality not implemented yet — you need to implement it based on your file format.");
-}
-
+const BATCH=60;let buf,dv,offsetTable=[],strings=[],mods={},parsed=false;
+const ui={file:qs('#fileInput'),search:qs('#search'),save:qs('#btnSave'),ide:qs('#btnIDE'),store:qs('#btnStore'),clear:qs('#btnClear'),prog:qs('#progress'),tbody:qs('#tbl tbody'),wrap:qs('#tableWrap')};
+function qs(s){return document.querySelector(s)}
+ui.file.onchange=e=>{if(!e.target.files[0])return;reset();const fr=new FileReader();fr.onload=ev=>{buf=ev.target.result;dv=new DataView(buf);if(!parseHeader())return;incrementalLoad();};fr.readAsArrayBuffer(e.target.files[0])};
+function reset(){offsetTable=[];strings=[];mods={};parsed=false;ui.tbody.innerHTML='';ui.save.disabled=ui.ide.disabled=ui.store.disabled=true;ui.search.disabled=true;ui.prog.style.width='0%'}
+function parseHeader(){try{const magic=dv.getUint32(0,true);if(magic!==0xFAB11BAF&&magic!==0xFAB11BFA)throw'bad magic';const ver=dv.getUint32(4,true);const litCount=dv.getUint32(8,true);const litOff=dv.getUint32(12,true);if(litCount<1||litOff+litCount*8>buf.byteLength)throw'bad literal table';// read offsets table ptr heuristically
+let strCount=dv.getUint32(0x10,true);let offTable=dv.getUint32(0x14,true);if(strCount<1||offTable+strCount*4>buf.byteLength){strCount=litCount;offTable=litOff;}
+for(let i=0;i<strCount;i++){const off=dv.getUint32(offTable+i*4,true);offsetTable.push(off)}return true}catch(err){alert('Parse failed: '+err);return false}}
+function readStr(off){if(off<4||off>=buf.byteLength)return'';const len=dv.getUint32(off-4,true);if(len<=0||off+len>buf.byteLength)return'';return new TextDecoder('utf-8').decode(new Uint8Array(buf,off,len))}
+async function incrementalLoad(){parsed=true;ui.search.disabled=false;ui.ide.disabled=ui.store.disabled=false;for(let i=0;i<offsetTable.length;i+=BATCH){const frag=document.createDocumentFragment();for(let j=i;j<Math.min(i+BATCH,offsetTable.length);j++){const txt=readStr(offsetTable[j]);strings[j]=txt;const tr=document.createElement('tr');tr.innerHTML=`<td>${j}</td><td class="orig"></td><td></td>`;tr.children[1].textContent=txt;const ta=document.createElement('textarea');ta.className='edit';ta.value=(mods[j]??txt);ta.dataset.idx=j;ta.oninput=e=>{const id=parseInt(e.target.dataset.idx);const val=e.target.value;mods[id]=val===strings[id]?undefined:val;ui.save.disabled=Object.values(mods).every(v=>v===undefined);ui.ide.disabled=ui.save.disabled;ui.store.disabled=ui.save.disabled};tr.children[2].appendChild(ta);frag.appendChild(tr);}ui.tbody.appendChild(frag);ui.prog.style.width=((i+BATCH)/offsetTable.length*100).toFixed(1)+'%';await new Promise(r=>setTimeout(r,0));}
+ui.prog.style.width='100%';}
+ui.search.oninput=()=>{const q=ui.search.value;[...ui.tbody.rows].forEach(r=>{const idx=parseInt(r.cells[0].textContent);const txt=strings[idx];const mod=mods[idx]??txt;r.style.display=(txt.includes(q)||mod.includes(q))?'':'none'})};
+ui.save.onclick=()=>downloadPatched();ui.ide.onclick=()=>downloadIDE();ui.store.onclick=()=>{localStorage.setItem('mdseMods',JSON.stringify(mods));alert('Saved edits to LocalStorage');};ui.clear.onclick=()=>{localStorage.removeItem('mdseMods');alert('LocalStorage cleared');};
+function downloadIDE(){const obj={modified:Object.fromEntries(Object.entries(mods).filter(([,v])=>v!==undefined))};const blob=new Blob([JSON.stringify(obj,null,2)],{type:'application/json'});triggerDownload(blob,'storage.ide');}
+function triggerDownload(blob,name){const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;a.click();URL.revokeObjectURL(url)}
+function downloadPatched(){const changed=Object.entries(mods).filter(([,v])=>v!==undefined);if(changed.length===0)return alert('No changes');let newBuf=new Uint8Array(buf.byteLength+1024*1024*5);newBuf.set(new Uint8Array(buf));let cursor=buf.byteLength;changed.forEach(([idxStr,newVal])=>{const idx=parseInt(idxStr);const encoded=new TextEncoder().encode(newVal);new DataView(newBuf.buffer).setUint32(cursor,encoded.length,true);cursor+=4;newBuf.set(encoded,cursor);offsetTable[idx]=cursor;cursor+=encoded.length;});offsetTable.forEach((off,i)=>{dv.setUint32(0x14+i*4,off,true)});// write back offsets table
+const final=newBuf.slice(0,cursor);triggerDownload(new Blob([final],{type:'application/octet-stream'}),'global-metadata.patched.dat');}
 </script>
-
 </body>
 </html>
