@@ -14,12 +14,10 @@ nav a { color:#fff; text-decoration:none; font-weight:500; }
 nav a:hover { text-decoration:underline; }
 main { max-width:1000px; margin:auto; padding:20px; }
 section { margin-bottom:30px; }
-#game-frame { display:none; width:100%; height:100vh; border:none; margin-top:0; }
 #tiny { position:fixed; bottom:2px; right:2px; font-size:5px; color:#333; }
 @media(max-width:600px){
   nav { flex-direction:column; gap:10px; }
   header { flex-direction:column; gap:10px; text-align:center; }
-  #game-frame { height:100vh; }
 }
 </style>
 </head>
@@ -43,9 +41,6 @@ section { margin-bottom:30px; }
     <h2>Welcome Students!</h2>
     <p>Access your lessons, homework, and school announcements here. Explore everything Vertex Education has to offer.</p>
   </section>
-
-  <!-- Iframe for game site with allowfullscreen -->
-  <iframe id="game-frame" src="" allowfullscreen sandbox="allow-same-origin allow-scripts allow-forms allow-popups"></iframe>
 </main>
 
 <footer>
@@ -62,11 +57,17 @@ document.addEventListener('click', () => {
     clicks.push(now);
     if (clicks.length > 5) clicks.shift();
     if (clicks.length === 5 && now - clicks[0] < 2000) {
-        // Load gn-math.github.io inside iframe without changing URL
-        const iframe = document.getElementById('game-frame');
-        iframe.src = "https://gn-math.github.io/";
-        iframe.style.display = 'block';
-        document.getElementById('school-content').style.display = 'none';
+        // Open hidden games page in new tab so pointer lock works
+        window.open("https://gn-math.github.io/", "_blank");
+    }
+});
+
+// Escape key closes fullscreen
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        if (document.fullscreenElement) {
+            document.exitFullscreen();
+        }
     }
 });
 </script>
