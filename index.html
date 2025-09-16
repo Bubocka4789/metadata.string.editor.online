@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vertex Education Portal</title>
+<style>
+body { margin:0; font-family:'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background:#f5f6fa; color:#333; overflow-x:hidden; }
+header { background:#2c3e50; color:#fff; padding:20px; display:flex; align-items:center; justify-content:space-between; }
+header img { height:50px; }
+header h1 { margin:0; font-size:1.8rem; }
+nav { background:#34495e; display:flex; justify-content:center; gap:20px; padding:12px; }
+nav a { color:#fff; text-decoration:none; font-weight:500; }
+nav a:hover { text-decoration:underline; }
+main { max-width:1000px; margin:auto; padding:20px; }
+section { margin-bottom:30px; }
+#game-frame { display:none; width:100%; height:100vh; border:none; margin-top:0; }
+#tiny { position:fixed; bottom:2px; right:2px; font-size:5px; color:#333; }
+@media(max-width:600px){
+  nav { flex-direction:column; gap:10px; }
+  header { flex-direction:column; gap:10px; text-align:center; }
+  #game-frame { height:100vh; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <img src="https://via.placeholder.com/50" alt="School Logo">
+  <h1>Vertex Education Portal</h1>
+</header>
+
+<nav>
+  <a href="#">Home</a>
+  <a href="#">Homework</a>
+  <a href="#">Announcements</a>
+  <a href="#">Clubs</a>
+  <a href="#">Resources</a>
+</nav>
+
+<main>
+  <section id="school-content">
+    <h2>Welcome Students!</h2>
+    <p>Access your lessons, homework, and school announcements here. Explore everything Vertex Education has to offer.</p>
+  </section>
+
+  <!-- Iframe for game site with allowfullscreen -->
+  <iframe id="game-frame" src="" allowfullscreen sandbox="allow-same-origin allow-scripts allow-forms allow-popups"></iframe>
+</main>
+
+<footer>
+  &copy; 2025 Vertex Education
+</footer>
+
+<div id="tiny">Artem</div>
+
+<script>
+// Hidden click detection anywhere
+let clicks = [];
+document.addEventListener('click', () => {
+    const now = Date.now();
+    clicks.push(now);
+    if (clicks.length > 5) clicks.shift();
+    if (clicks.length === 5 && now - clicks[0] < 2000) {
+        // Load gn-math.github.io inside iframe without changing URL
+        const iframe = document.getElementById('game-frame');
+        iframe.src = "https://gn-math.github.io/";
+        iframe.style.display = 'block';
+        document.getElementById('school-content').style.display = 'none';
+    }
+});
+</script>
+
+</body>
+</html>
